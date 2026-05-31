@@ -33,3 +33,21 @@ npm run build
 ## AI 設定
 
 在 My Learning 頁面可選 OpenAI / Gemini，並輸入 API Key。前端保存 API Key 只適合個人測試；正式產品建議改用後端 API Proxy，避免 key 外洩。
+
+## Randomization Upgrade
+
+This version adds stronger AI variation:
+
+- 250+ daily-life scenario bank inside `api/ai.js`
+- Random Seed sent from the frontend for every generation
+- Higher temperature: Scenario / Roleplay 1.2, Reading 1.1
+- Anti-repetition instruction: "Do not generate similar content to previous outputs"
+- Recent generated titles are sent to the backend to reduce repeated output
+
+Optional Vercel Environment Variable:
+
+```txt
+AI_TEMPERATURE=1.2
+```
+
+If omitted, the backend uses task-based defaults automatically.

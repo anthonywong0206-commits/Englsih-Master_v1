@@ -26,6 +26,10 @@ const SCENARIOS = [
 function getJSON(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback } catch { return fallback } }
 function setJSON(key, value) { localStorage.setItem(key, JSON.stringify(value)) }
 function today() { return new Date().toISOString().slice(0, 10) }
+
+function makeSeed() { return `${Date.now()}-${Math.floor(Math.random() * 1000000)}` }
+function recentScenarioTitles(limit = 12) { return getJSON(STORAGE.scenarios, []).slice(0, limit).map(x => x.title).filter(Boolean) }
+function recentReadingTitles(limit = 8) { return getJSON(STORAGE.readings, []).slice(0, limit).map(x => x.title).filter(Boolean) }
 function updateStats(type) {
   const stats = getJSON(STORAGE.stats, { scenarios: 0, readings: 0, translations: 0, days: [] })
   if (type === 'scenario') stats.scenarios += 1
@@ -135,7 +139,7 @@ function ScenarioHome() {
   async function generate(id = selected) {
     setLoading(true)
     const s = SCENARIOS.find(x => x.id === id) || scenario
-    const data = await askAI('scenario', { scenarioId: id, title: s.title, prompt: s.prompt, role: s.role })
+    const data = await askAI('scenario', { scenarioId: id, title: s.title, prompt: s.prompt, role: s.role, seed: makeSeed(), recentTitles: recentScenarioTitles(), avoidRepeat: true })
     setResult(data)
     updateStats('scenario')
     const history = getJSON(STORAGE.scenarios, [])
@@ -211,7 +215,7 @@ function RoleplayLab({ scenario }) {
     setLoading(true)
     const myText = userText.trim()
     setMessages(m => [...m, { who:'me', text: myText }])
-    const data = await askAI('roleplay', { scene: current.label, prompt: current.prompt, role: current.role, userText: myText, history: messages.slice(-6) })
+    const data = await askAI('roleplay', { scene: current.label, prompt: current.prompt, role: current.role, userText: myText, history: messages.slice(-6), seed: makeSeed(), avoidRepeat: true })
     setFeedback(data)
     setMessages(m => [...m, { who:'ai', text: data.aiReply || 'Good. Please continue.' }])
     setUserText('')
@@ -293,7 +297,7 @@ function Reading() {
   }
   async function generate() {
     setLoading(true)
-    const data = await askAI('reading', form)
+    const data = await askAI('reading', { ...form, seed: makeSeed(), recentTitles: recentReadingTitles(), avoidRepeat: true })
     setResult(data)
     updateStats('reading')
     saveReading(data)
