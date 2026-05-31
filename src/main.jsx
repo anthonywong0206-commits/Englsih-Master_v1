@@ -285,9 +285,88 @@ function Select({label,v,set,opts}){ return <label className="select"><span>{lab
 function TwoCol({leftTitle,rightTitle,left,right}){ return <div className="twoCol"><div><h3>{leftTitle}</h3><p>{left}</p></div><div><h3>{rightTitle}</h3><p>{right}</p></div></div> }
 function Vocabulary({items=[]}){ return <div><h3>Vocabulary</h3><div className="vocabGrid">{items.map((v,i)=><div className="mini" key={i}><b>{v.word}</b><span>{v.pos} · {v.zh}</span><p>{v.example}</p></div>)}</div></div> }
 function ShareBox({refEl, fileName}) {
-  async function toImage() { if(!refEl.current) return; const canvas = await html2canvas(refEl.current, { scale: 2, backgroundColor: '#ffffff' }); const a = document.createElement('a'); a.download = `${fileName}.png`; a.href = canvas.toDataURL('image/png'); a.click() }
-  async function toPDF() { if(!refEl.current) return; const canvas = await html2canvas(refEl.current, { scale: 2, backgroundColor: '#ffffff' }); const img = canvas.toDataURL('image/png'); const pdf = new jsPDF('p','mm','a4'); const w = 210; const h = canvas.height * w / canvas.width; pdf.addImage(img,'PNG',0,0,w,Math.min(h,297)); pdf.save(`${fileName}.pdf`) }
-  return <div className="shareBtns"><button onClick={toPDF}><Download size={18}/> 生成 PDF</button><button onClick={toImage}><ImageIcon size={18}/> 生成圖片</button></div>
+  const [exporting, setExporting] = useState(false)
+
+  async function captureExportCanvas() {
+    if (!refEl.current) return null
+    const node = refEl.current
+    node.classList.add('exportMode')
+    await new Promise(resolve => setTimeout(resolve, 120))
+    const canvas = await html2canvas(node, {
+      scale: 2.4,
+      backgroundColor: '#ffffff',
+      useCORS: true,
+      allowTaint: true,
+      windowWidth: Math.max(900, node.scrollWidth),
+      scrollX: 0,
+      scrollY: -window.scrollY
+    })
+    node.classList.remove('exportMode')
+    return canvas
+  }
+
+  async function toImage() {
+    if (!refEl.current || exporting) return
+    setExporting(true)
+    try {
+      const canvas = await captureExportCanvas()
+      if (!canvas) return
+      const a = document.createElement('a')
+      a.download = `${fileName}-learning-card.png`
+      a.href = canvas.toDataURL('image/png', 1)
+      a.click()
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  async function toPDF() {
+    if (!refEl.current || exporting) return
+    setExporting(true)
+    try {
+      const canvas = await captureExportCanvas()
+      if (!canvas) return
+
+      const pdf = new jsPDF('p', 'mm', 'a4')
+      const pdfW = 210
+      const pdfH = 297
+      const margin = 10
+      const contentW = pdfW - margin * 2
+      const contentH = pdfH - margin * 2
+      const pxPerMm = canvas.width / contentW
+      const pagePxHeight = Math.floor(contentH * pxPerMm)
+      let renderedHeight = 0
+      let pageIndex = 0
+
+      while (renderedHeight < canvas.height) {
+        const sliceHeight = Math.min(pagePxHeight, canvas.height - renderedHeight)
+        const pageCanvas = document.createElement('canvas')
+        pageCanvas.width = canvas.width
+        pageCanvas.height = sliceHeight
+        const ctx = pageCanvas.getContext('2d')
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height)
+        ctx.drawImage(canvas, 0, renderedHeight, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight)
+
+        if (pageIndex > 0) pdf.addPage()
+        const imgData = pageCanvas.toDataURL('image/png', 1)
+        const imgH = sliceHeight / pxPerMm
+        pdf.addImage(imgData, 'PNG', margin, margin, contentW, imgH)
+        pdf.setFontSize(8)
+        pdf.setTextColor(130)
+        pdf.text(`English Master AI · Page ${pageIndex + 1}`, margin, pdfH - 5)
+
+        renderedHeight += sliceHeight
+        pageIndex += 1
+      }
+
+      pdf.save(`${fileName}-learning-notes.pdf`)
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  return <div className="shareBtns"><button onClick={toPDF} disabled={exporting}><Download size={18}/> {exporting ? '生成中...' : '生成 PDF'}</button><button onClick={toImage} disabled={exporting}><ImageIcon size={18}/> {exporting ? '生成中...' : '生成圖片'}</button></div>
 }
 
 createRoot(document.getElementById('root')).render(<App />)
