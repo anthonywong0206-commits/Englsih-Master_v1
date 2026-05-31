@@ -101,14 +101,20 @@ Reply as the other person in 1 short natural English sentence, and keep the conv
 Return JSON with exactly these keys:
 {
   "aiReply":"",
+  "aiZh":"",
   "correction":"",
   "pronunciation":80,
   "fluency":80,
   "accuracy":80,
   "mispronouncedWords":[],
   "teacherTip":"",
-  "nextPrompt":""
+  "nextPrompt":"",
+  "suggestedReplies":[{"en":"","zh":""},{"en":"","zh":""},{"en":"","zh":""}]
 }
+Rules:
+- aiReply must be the next natural line from the other person and must match the full conversation history.
+- suggestedReplies must be 3 to 4 possible learner replies that directly answer aiReply. Do not give unrelated generic sentences.
+- Never restart the conversation unless history is empty.
 Use Traditional Chinese for explanations. Keep it encouraging and practical.`
   }
 

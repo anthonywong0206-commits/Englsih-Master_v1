@@ -10,7 +10,8 @@ const STORAGE = {
   readings: 'ema_readings_v2',
   scenarios: 'ema_scenarios_v1',
   settings: 'ema_settings_v2',
-  stats: 'ema_stats_v2'
+  stats: 'ema_stats_v2',
+  roleplays: 'ema_roleplays_v1'
 }
 
 const defaultSettings = { theme: 'light' }
@@ -112,18 +113,29 @@ function normalizeReadingResult(data, payload = {}) {
   }
 }
 
-function normalizeRoleplayResult(data) {
+function normalizeRoleplayResult(data, userText = '') {
   const safe = data && typeof data === 'object' && !Array.isArray(data) ? data : {}
   const num = (v, f) => Math.max(0, Math.min(100, Number.isFinite(Number(v)) ? Number(v) : f))
+  const aiReply = asText(safe.aiReply || safe.reply, 'I see. Could you tell me a little more?')
+  const suggestedReplies = asArray(safe.suggestedReplies || safe.suggestions || safe.userSuggestions).map(x => {
+    const obj = x && typeof x === 'object' ? x : { en: String(x || '') }
+    return { en: asText(obj.en || obj.text, ''), zh: asText(obj.zh || obj.translation, '') }
+  }).filter(x => x.en).slice(0, 4)
   return {
-    aiReply: asText(safe.aiReply || safe.reply, 'Good. Please continue.'),
-    correction: asText(safe.correction, 'Try to use a complete sentence.'),
+    aiReply,
+    aiZh: asText(safe.aiZh || safe.replyZh || safe.zh, ''),
+    correction: asText(safe.correction, userText ? `Better: ${userText}` : 'Try to use a complete sentence.'),
     pronunciation: num(safe.pronunciation, 80),
     fluency: num(safe.fluency, 80),
     accuracy: num(safe.accuracy, 80),
     mispronouncedWords: asArray(safe.mispronouncedWords || safe.wordsToImprove).map(x => asText(x)).filter(Boolean).slice(0, 8),
     teacherTip: asText(safe.teacherTip || safe.tip, 'Keep practising with short and clear sentences.'),
-    nextPrompt: asText(safe.nextPrompt, 'Please continue the conversation.')
+    nextPrompt: asText(safe.nextPrompt, 'Please continue the conversation.'),
+    suggestedReplies: suggestedReplies.length ? suggestedReplies : [
+      { en: 'Could you explain that again, please?', zh: '可以再解釋一次嗎？' },
+      { en: 'That sounds good to me.', zh: '我覺得這樣可以。' },
+      { en: 'May I ask one more question?', zh: '我可以多問一個問題嗎？' }
+    ]
   }
 }
 function recentScenarioTitles(limit = 12) { return getJSON(STORAGE.scenarios, []).slice(0, limit).map(x => x.title).filter(Boolean) }
@@ -209,7 +221,7 @@ function mockAI(task, payload) {
 function App() {
   const [tab, setTab] = useState('scenario')
   const [settings, setSettings] = useState(getJSON(STORAGE.settings, defaultSettings))
-  const tabs = [['scenario', Home, '情境學習'], ['reading', Newspaper, '閱讀理解'], ['translator', Languages, '翻譯學習'], ['learning', UserRound, '學習中心']]
+  const tabs = [['scenario', Home, '情境學習'], ['roleplay', MessageCircle, '角色對話'], ['reading', Newspaper, '閱讀理解'], ['translator', Languages, '翻譯學習'], ['learning', UserRound, '學習中心']]
   const setTheme = theme => { const next = { ...settings, theme }; setSettings(next); setJSON(STORAGE.settings, next) }
   return <div className={`app ${settings.theme}`}>
     <header className="topBar">
@@ -219,6 +231,7 @@ function App() {
     </header>
     <main>
       {tab === 'scenario' && <ScenarioHome />}
+      {tab === 'roleplay' && <RoleplayPage />}
       {tab === 'reading' && <Reading />}
       {tab === 'translator' && <Translator />}
       {tab === 'learning' && <Learning />}
@@ -272,92 +285,107 @@ function ScenarioHome() {
       </aside>
     </div>
     <ShareBox refEl={ref} fileName="scenario-lesson" />
-    <RoleplayLab scenario={scenario} />
     <h3 className="moreTitle">更多日常場景</h3>
     <div className="miniScenarioGrid">{['酒店入住','問路指路','搭乘交通','看醫生','面試求職','更多場景'].map((x,i)=><div className="miniScene" key={x}><span>{['🏨','🗺️','🚌','🩺','👨🏻‍💼','•••'][i]}</span><b>{x}</b><small>{10+i} 對話</small></div>)}</div>
   </section>
 }
 
 
-function RoleplayLab({ scenario }) {
+function RoleplayPage() {
   const roleOptions = [
-    { id: 'restaurant', label: '餐廳', prompt: 'ordering food in a restaurant', role: 'waiter' },
-    { id: 'phone', label: '電話', prompt: 'making an appointment by phone', role: 'receptionist' },
-    { id: 'interview', label: '面試', prompt: 'answering job interview questions', role: 'interviewer' },
-    { id: 'travel', label: '旅行', prompt: 'asking for help during travel', role: 'hotel or airport staff' },
-    { id: 'clinic', label: '醫院', prompt: 'describing symptoms to clinic staff', role: 'nurse' },
-    { id: 'email', label: '工作電郵', prompt: 'discussing a work email politely', role: 'colleague' }
+    { id: 'restaurant', icon:'🍽️', label: '餐廳投訴餐點', prompt: 'a restaurant customer politely complaining about a cold steak and asking for a solution', role: 'server' },
+    { id: 'phone', icon:'📞', label: '電話預約', prompt: 'making and changing an appointment by phone', role: 'receptionist' },
+    { id: 'interview', icon:'💼', label: '面試問答', prompt: 'answering job interview questions clearly and politely', role: 'interviewer' },
+    { id: 'travel', icon:'✈️', label: '旅行求助', prompt: 'asking for help at a hotel or airport during travel', role: 'hotel or airport staff' },
+    { id: 'clinic', icon:'🏥', label: '醫院診所', prompt: 'describing symptoms and asking clinic staff for help', role: 'nurse' },
+    { id: 'email', icon:'✉️', label: '工作電郵', prompt: 'discussing a work email politely with a colleague', role: 'colleague' }
   ]
-  const [scene, setScene] = useState(scenario?.id && roleOptions.some(x=>x.id===scenario.id) ? scenario.id : 'restaurant')
-  const [userText, setUserText] = useState('Could I have a table for two, please?')
-  const [messages, setMessages] = useState([{ who:'ai', text:'Hello! Choose a role-play scene, say or type one English sentence, and I will reply like the other person.' }])
+  const [scene, setScene] = useState('restaurant')
+  const [userText, setUserText] = useState('')
+  const [messages, setMessages] = useState([{ who:'ai', text:'Good evening! How can I help you today?', zh:'晚上好！有什麼可以幫你？' }])
   const [feedback, setFeedback] = useState(null)
   const [listening, setListening] = useState(false)
   const [loading, setLoading] = useState(false)
   const recognitionRef = useRef(null)
+  const chatEndRef = useRef(null)
   const current = roleOptions.find(x=>x.id===scene) || roleOptions[0]
 
   function speak(text) { try { window.speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text || ''); u.lang = 'en-US'; u.rate = .9; window.speechSynthesis.speak(u) } catch {} }
-
+  function resetScene(nextId = scene) {
+    const next = roleOptions.find(x => x.id === nextId) || roleOptions[0]
+    setScene(next.id)
+    setFeedback(null)
+    setUserText('')
+    setMessages([{ who:'ai', text:`Hi! Let's practise ${next.prompt}. You can start with one short sentence.`, zh:'你好！我們開始這個情境練習。你可以先講一句簡單英文。' }])
+  }
+  function saveTranscript(nextMessages) {
+    const history = getJSON(STORAGE.roleplays, [])
+    setJSON(STORAGE.roleplays, [{ id: Date.now(), date: today(), scene: current.label, messages: nextMessages.slice(-20) }, ...history].slice(0, 20))
+  }
   function startVoice() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
     if (!SpeechRecognition) { alert('此瀏覽器暫未支援語音辨識，請改用 Chrome / Edge 或手動輸入英文句子。'); return }
     const rec = new SpeechRecognition()
-    rec.lang = 'en-US'
-    rec.interimResults = false
-    rec.maxAlternatives = 1
+    rec.lang = 'en-US'; rec.interimResults = false; rec.maxAlternatives = 1
     rec.onstart = () => setListening(true)
     rec.onend = () => setListening(false)
     rec.onerror = () => setListening(false)
     rec.onresult = e => { const text = e.results?.[0]?.[0]?.transcript || ''; if (text) setUserText(text) }
-    recognitionRef.current = rec
-    rec.start()
+    recognitionRef.current = rec; rec.start()
   }
   function stopVoice(){ try { recognitionRef.current?.stop() } catch {}; setListening(false) }
 
-  async function sendTurn() {
-    if (!userText.trim()) return
+  async function sendTurn(textOverride) {
+    const myText = (textOverride || userText).trim()
+    if (!myText || loading) return
     setLoading(true)
-    const myText = userText.trim()
-    setMessages(m => [...m, { who:'me', text: myText }])
+    const userMsg = { who:'me', text: myText, zh:'' }
+    const baseHistory = [...messages, userMsg]
+    setMessages(baseHistory)
     try {
-      const raw = await askAI('roleplay', { scene: current.label, prompt: current.prompt, role: current.role, userText: myText, history: messages.slice(-6), seed: makeSeed(), avoidRepeat: true })
-      const data = normalizeRoleplayResult(raw)
+      const raw = await askAI('roleplay', { scene: current.label, prompt: current.prompt, role: current.role, userText: myText, history: baseHistory.slice(-10), seed: makeSeed(), avoidRepeat: true })
+      const data = normalizeRoleplayResult(raw, myText)
       setFeedback(data)
-      setMessages(m => [...m, { who:'ai', text: data.aiReply || 'Good. Please continue.' }])
+      const aiMsg = { who:'ai', text: data.aiReply || 'Good. Please continue.', zh: data.aiZh || '' }
+      const nextMessages = [...baseHistory, aiMsg]
+      setMessages(nextMessages)
+      saveTranscript(nextMessages)
       if (data.aiReply) speak(data.aiReply)
+      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior:'smooth' }), 60)
     } catch (err) {
       console.warn('Roleplay failed:', err)
-      const data = normalizeRoleplayResult(null)
+      const data = normalizeRoleplayResult(null, myText)
       setFeedback(data)
-      setMessages(m => [...m, { who:'ai', text: data.aiReply }])
+      setMessages([...baseHistory, { who:'ai', text:data.aiReply, zh:data.aiZh || '' }])
     } finally {
       setUserText('')
       setLoading(false)
     }
   }
 
-  return <section className="roleplayLab" id="roleplayLab">
-    <div className="roleHeader"><div><h2>🎭 角色扮演對話</h2><p>你講一句，AI 回一句；同時提供英文修正、發音／流暢度／準確度評分。</p></div><span className="betaPill">Speech Practice</span></div>
-    <div className="roleChips">{roleOptions.map(o => <button key={o.id} className={scene===o.id?'active':''} onClick={()=>{setScene(o.id);setMessages([{who:'ai',text:`Great. Let's practise ${o.prompt}. Please say your first sentence.`}]);setFeedback(null)}}>{o.label}</button>)}</div>
-    <div className="roleGrid">
-      <div className="roleChat">
-        <div className="roleMeta"><b>{current.label}</b><span>AI 扮演：{current.role}</span></div>
-        <div className="roleMessages">{messages.map((m,i)=><div key={i} className={`roleMsg ${m.who}`}><span>{m.who==='me'?'你':'AI'}</span><p>{m.text}</p>{m.who==='ai'&&<button onClick={()=>speak(m.text)}><Volume2 size={15}/> 朗讀</button>}</div>)}</div>
-        <textarea value={userText} onChange={e=>setUserText(e.target.value)} placeholder="輸入或錄音：例如 Could I have a table for two, please?" />
-        <div className="roleActions"><button onClick={listening?stopVoice:startVoice} className={listening?'recording':''}><Mic size={18}/> {listening?'停止錄音':'錄音'}</button><button onClick={sendTurn} disabled={loading}><Sparkles size={18}/> {loading?'AI 分析中...':'送出對話'}</button></div>
+  return <section className="page roleplayPage">
+    <div className="roleHero panel">
+      <div><h2>🎭 角色扮演對話</h2><p className="hint">獨立練習頁面：完整保留對話前文，AI 會根據上下文回覆，並提供 3–4 句配合當前情境的建議回應。</p></div>
+      <button className="outlineBtn" onClick={() => resetScene()}><RefreshCw size={17}/> 重新開始</button>
+    </div>
+    <div className="roleSceneGrid">{roleOptions.map(o => <button key={o.id} className={scene===o.id?'active':''} onClick={()=>resetScene(o.id)}><span>{o.icon}</span><b>{o.label}</b><small>AI 扮演：{o.role}</small></button>)}</div>
+    <div className="roleGrid roleStandalone">
+      <div className="roleChat panel">
+        <div className="roleMeta"><b>{current.icon} {current.label}</b><span>完整對話不會消失</span></div>
+        <div className="roleMessages big">{messages.map((m,i)=><div key={i} className={`roleMsg ${m.who}`}><span>{m.who==='me'?'你':'AI'}</span><p>{m.text}</p>{m.zh && <small>{m.zh}</small>}{m.who==='ai'&&<button onClick={()=>speak(m.text)}><Volume2 size={15}/> 朗讀</button>}</div>)}<div ref={chatEndRef}/></div>
+        {feedback?.suggestedReplies?.length > 0 && <div className="suggestionBox"><b>建議你可以這樣回應：</b><div>{feedback.suggestedReplies.map((sug,i)=><button key={i} onClick={()=>setUserText(sug.en)}><span>{sug.en}</span><small>{sug.zh}</small></button>)}</div></div>}
+        <textarea value={userText} onChange={e=>setUserText(e.target.value)} placeholder="輸入或錄音：例如 I have a problem with my order." />
+        <div className="roleActions"><button onClick={listening?stopVoice:startVoice} className={listening?'recording':''}><Mic size={18}/> {listening?'停止錄音':'錄音'}</button><button onClick={()=>sendTurn()} disabled={loading}><Sparkles size={18}/> {loading?'AI 回覆中...':'送出'}</button></div>
       </div>
-      <div className="scorePanel">
-        <h3>即時教學及發音評分</h3>
-        {!feedback ? <div className="emptyFeedback">先錄音或輸入一句英文，AI 會即時給你回覆及評分。</div> : <>
-          <ScoreBar label="Pronunciation" value={feedback.pronunciation}/>
-          <ScoreBar label="Fluency" value={feedback.fluency}/>
-          <ScoreBar label="Accuracy" value={feedback.accuracy}/>
+      <div className="scorePanel panel">
+        <h3>即時修正及發音評分</h3>
+        {!feedback ? <div className="emptyFeedback">講或輸入一句英文後，AI 會回覆下一句、修正英文，並提供 pronunciation / fluency / accuracy 評分。</div> : <>
+          <ScoreBar label="Pronunciation" value={feedback.pronunciation}/><ScoreBar label="Fluency" value={feedback.fluency}/><ScoreBar label="Accuracy" value={feedback.accuracy}/>
           <div className="correctionBox"><b>英文修正</b><p>{feedback.correction}</p></div>
-          <div className="correctionBox"><b>可能讀錯／需留意的字</b><p>{feedback.mispronouncedWords?.length ? feedback.mispronouncedWords.join(', ') : '暫未偵測到明顯問題'}</p></div>
+          <div className="correctionBox"><b>需留意讀音</b><p>{feedback.mispronouncedWords?.length ? feedback.mispronouncedWords.join(', ') : '暫未偵測到明顯問題'}</p></div>
           <div className="correctionBox"><b>AI Teacher Tip</b><p>{feedback.teacherTip}</p><small>{feedback.nextPrompt}</small></div>
         </>}
-        <small className="voiceNote">提示：瀏覽器錄音評分以語音辨識文字＋AI 分析為基礎；如要專業音素級評分，日後可再接入專用 Speech API。</small>
+        <small className="voiceNote">提示：目前以瀏覽器語音辨識文字＋AI 分析作評分；日後可再接入專業 Speech API 做音素級評分。</small>
       </div>
     </div>
   </section>
