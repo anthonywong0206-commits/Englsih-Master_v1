@@ -159,9 +159,70 @@ function ScenarioHome() {
 
 function Reading() {
   const [form, setForm] = useState({ topic: 'AI', customTopic: '', level: 'Intermediate', style: 'BBC News', words: '500' })
-  const [result, setResult] = useState(null); const [loading, setLoading] = useState(false); const ref = useRef(null)
-  async function generate() { setLoading(true); const data = await askAI('reading', form); setResult(data); updateStats('reading'); const list = getJSON(STORAGE.readings, []); setJSON(STORAGE.readings, [{ title: data.title, date: today(), topic: form.customTopic || form.topic }, ...list].slice(0, 30)); setLoading(false) }
-  return <section className="page"><div className="panel"><h2>📰 AI Reading</h2><div className="formGrid"><Select label="主題" v={form.topic} set={v=>setForm({...form,topic:v})} opts={['科技','健康','環保','旅遊','心理學','歷史','商業','AI','金融','教育','自訂主題']}/><input className="field" value={form.customTopic} onChange={e=>setForm({...form,customTopic:e.target.value})} placeholder="自訂主題，可留空"/><Select label="難度" v={form.level} set={v=>setForm({...form,level:v})} opts={['Beginner','Elementary','Intermediate','Upper Intermediate','Advanced','IELTS','DSE','TOEFL','Academic']}/><Select label="文章風格" v={form.style} set={v=>setForm({...form,style:v})} opts={['BBC News','TED Talk','National Geographic','The Economist','CNN','Scientific American','Story','Conversation','Business Report','Custom']}/><Select label="字數" v={form.words} set={v=>setForm({...form,words:v})} opts={['300','500','800','1200']}/></div><button className="primary" onClick={generate}><Wand2 size={18}/> Generate Article</button></div>{loading && <Loading/>}{result && <><article ref={ref} className="panel shareCard"><h2>{result.title}</h2><TwoCol leftTitle="英文文章" rightTitle="中文翻譯" left={result.article} right={result.translation}/><Vocabulary items={result.vocabulary}/><Block title="Key Points" items={result.keyPoints}/><Block title="Grammar Focus" items={result.grammar}/><h3>Reading Questions</h3>{result.questions?.map((q,i)=><div className="qa" key={i}><b>Q{i+1}. {q.q}</b><p>Answer: {q.a}</p></div>)}<Teacher text={result.teacher}/></article><ShareBox refEl={ref} fileName="ai-reading" /></>}</section>
+  const [result, setResult] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [savedMsg, setSavedMsg] = useState('')
+  const ref = useRef(null)
+
+  function speakArticle(text) {
+    try {
+      window.speechSynthesis.cancel()
+      const u = new SpeechSynthesisUtterance(text || '')
+      u.lang = 'en-US'
+      u.rate = 0.86
+      u.pitch = 1
+      window.speechSynthesis.speak(u)
+    } catch {}
+  }
+  function stopSpeak() { try { window.speechSynthesis.cancel() } catch {} }
+  function saveReading(data = result) {
+    if (!data) return
+    const list = getJSON(STORAGE.readings, [])
+    const item = {
+      id: Date.now(),
+      date: today(),
+      title: data.title || 'AI Reading Article',
+      topic: form.customTopic || form.topic,
+      level: form.level,
+      style: form.style,
+      words: form.words,
+      article: data.article || '',
+      translation: data.translation || '',
+      vocabulary: data.vocabulary || [],
+      keyPoints: data.keyPoints || [],
+      grammar: data.grammar || [],
+      questions: data.questions || [],
+      teacher: data.teacher || ''
+    }
+    setJSON(STORAGE.readings, [item, ...list].slice(0, 80))
+    setSavedMsg('已儲存到學習中心')
+    setTimeout(() => setSavedMsg(''), 1800)
+  }
+  async function generate() {
+    setLoading(true)
+    const data = await askAI('reading', form)
+    setResult(data)
+    updateStats('reading')
+    saveReading(data)
+    setLoading(false)
+  }
+  return <section className="page">
+    <div className="panel">
+      <h2>📰 AI Reading</h2>
+      <p className="hint">AI 生成文章後會自動儲存到學習中心，之後可翻看及朗讀。</p>
+      <div className="formGrid"><Select label="主題" v={form.topic} set={v=>setForm({...form,topic:v})} opts={['科技','健康','環保','旅遊','心理學','歷史','商業','AI','金融','教育','自訂主題']}/><input className="field" value={form.customTopic} onChange={e=>setForm({...form,customTopic:e.target.value})} placeholder="自訂主題，可留空"/><Select label="難度" v={form.level} set={v=>setForm({...form,level:v})} opts={['Beginner','Elementary','Intermediate','Upper Intermediate','Advanced','IELTS','DSE','TOEFL','Academic']}/><Select label="文章風格" v={form.style} set={v=>setForm({...form,style:v})} opts={['BBC News','TED Talk','National Geographic','The Economist','CNN','Scientific American','Story','Conversation','Business Report','Custom']}/><Select label="字數" v={form.words} set={v=>setForm({...form,words:v})} opts={['300','500','800','1200']}/></div>
+      <button className="primary" onClick={generate}><Wand2 size={18}/> Generate Article</button>
+      {savedMsg && <div className="savedToast">✅ {savedMsg}</div>}
+    </div>
+    {loading && <Loading/>}
+    {result && <>
+      <article ref={ref} className="panel shareCard">
+        <div className="articleHead"><div><h2>{result.title}</h2><p className="hint">已自動加入學習中心，可日後重溫。</p></div><div className="speakTools"><button onClick={() => speakArticle(result.article)}><Volume2 size={17}/> 朗讀文章</button><button className="softMini" onClick={stopSpeak}>停止</button><button className="softMini" onClick={() => saveReading()}><Save size={16}/> 儲存</button></div></div>
+        <TwoCol leftTitle="英文文章" rightTitle="中文翻譯" left={result.article} right={result.translation}/><Vocabulary items={result.vocabulary}/><Block title="Key Points" items={result.keyPoints}/><Block title="Grammar Focus" items={result.grammar}/><h3>Reading Questions</h3>{result.questions?.map((q,i)=><div className="qa" key={i}><b>Q{i+1}. {q.q}</b><p>Answer: {q.a}</p></div>)}<Teacher text={result.teacher}/>
+      </article>
+      <ShareBox refEl={ref} fileName="ai-reading" />
+    </>}
+  </section>
 }
 
 function Translator() {
@@ -175,10 +236,44 @@ function Translator() {
 function Learning() {
   const stats = getJSON(STORAGE.stats, { scenarios:0, readings:0, translations:0, days:[] })
   const histories = getJSON(STORAGE.scenarios, [])
-  const readings = getJSON(STORAGE.readings, [])
+  const [readings, setReadings] = useState(getJSON(STORAGE.readings, []))
+  const [opened, setOpened] = useState(null)
   function clearData(){ if(confirm('確定清空所有學習資料？')){ Object.values(STORAGE).forEach(k=>localStorage.removeItem(k)); location.reload() } }
+  function deleteReading(id){ const next = readings.filter(r => r.id !== id); setReadings(next); setJSON(STORAGE.readings, next); if(opened?.id === id) setOpened(null) }
+  function speakArticle(text) { try { window.speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text || ''); u.lang = 'en-US'; u.rate = 0.86; window.speechSynthesis.speak(u) } catch {} }
+  function stopSpeak() { try { window.speechSynthesis.cancel() } catch {} }
   const advice = useMemo(()=> stats.scenarios < 3 ? '建議先每天完成 3 個日常情境對話，建立開口講英文的信心。' : '你已開始建立學習節奏，可以加入閱讀理解和翻譯練習。', [stats.scenarios])
-  return <section className="page grid2"><div className="panel"><h2>👤 My Learning</h2><div className="statsGrid"><Stat label="情境練習" value={stats.scenarios}/><Stat label="閱讀篇數" value={stats.readings}/><Stat label="翻譯次數" value={stats.translations}/><Stat label="學習天數" value={stats.days.length}/></div><Teacher title="AI 學習分析" text={advice}/><h3>最近情境</h3><div className="list">{histories.slice(0,6).map((r,i)=><div className="listItem" key={i}><b>{r.title}</b><span>{r.date}</span></div>)}{!histories.length && <p className="hint">暫未完成情境練習。</p>}</div><h3>最近閱讀</h3><div className="list">{readings.slice(0,6).map((r,i)=><div className="listItem" key={i}><b>{r.title}</b><span>{r.date}</span></div>)}</div></div><aside className="panel"><h3>AI 後台設定</h3><div className="backendBox"><b>✅ Vercel 後台 API 模式</b><p>API Key 不會放在前端。請到 Vercel Environment Variables 設定：</p><code>AI_PROVIDER=openai</code><code>OPENAI_API_KEY=你的Key</code><code>或 GEMINI_API_KEY=你的Key</code></div><button className="danger" onClick={clearData}><Trash2 size={18}/> 清空資料</button><Teacher title="每日任務" text="完成 1 個情境對話、朗讀 3 句英文、記低 5 個實用句型。"/></aside></section>
+  return <section className="page grid2">
+    <div className="panel">
+      <h2>👤 My Learning</h2>
+      <div className="statsGrid"><Stat label="情境練習" value={stats.scenarios}/><Stat label="閱讀篇數" value={stats.readings}/><Stat label="翻譯次數" value={stats.translations}/><Stat label="學習天數" value={stats.days.length}/></div>
+      <Teacher title="AI 學習分析" text={advice}/>
+      <h3>已儲存文章</h3>
+      <div className="readingShelf">
+        {readings.map((r,i)=><button className={`savedArticle ${opened?.id === r.id ? 'active' : ''}`} key={r.id || i} onClick={()=>setOpened(r)}>
+          <div><b>{r.title}</b><span>{r.topic || 'AI Reading'} · {r.level || 'Level'} · {r.date}</span></div><small>查看</small>
+        </button>)}
+        {!readings.length && <p className="hint">暫未儲存文章。到「閱讀理解」生成文章後會自動出現在這裡。</p>}
+      </div>
+      <h3>最近情境</h3>
+      <div className="list">{histories.slice(0,6).map((r,i)=><div className="listItem" key={i}><b>{r.title}</b><span>{r.date}</span></div>)}{!histories.length && <p className="hint">暫未完成情境練習。</p>}</div>
+    </div>
+    <aside className="panel">
+      <h3>文章重溫</h3>
+      {!opened && <div className="emptyArticle"><BookOpen/><b>選擇一篇文章</b><p>可以翻看英文、中文翻譯、重點字彙及一鍵朗讀。</p></div>}
+      {opened && <div className="openedArticle">
+        <div className="articleHead small"><div><h2>{opened.title}</h2><p className="hint">{opened.topic} · {opened.level} · {opened.style}</p></div></div>
+        <div className="speakTools full"><button onClick={() => speakArticle(opened.article)}><Volume2 size={17}/> 朗讀文章</button><button className="softMini" onClick={stopSpeak}>停止</button><button className="softMini dangerText" onClick={() => deleteReading(opened.id)}><Trash2 size={16}/> 刪除</button></div>
+        <h4>英文文章</h4><p className="articleText">{opened.article}</p>
+        <h4>中文翻譯</h4><p className="articleText zh">{opened.translation}</p>
+        <Vocabulary items={opened.vocabulary || []}/>
+        <Block title="Key Points" items={opened.keyPoints || []}/>
+        <Block title="Grammar Focus" items={opened.grammar || []}/>
+        <Teacher text={opened.teacher}/>
+      </div>}
+      <h3>AI 後台設定</h3><div className="backendBox"><b>✅ Vercel 後台 API 模式</b><p>API Key 不會放在前端。請到 Vercel Environment Variables 設定：</p><code>AI_PROVIDER=openai</code><code>OPENAI_API_KEY=你的Key</code><code>或 GEMINI_API_KEY=你的Key</code></div><button className="danger" onClick={clearData}><Trash2 size={18}/> 清空資料</button><Teacher title="每日任務" text="完成 1 個情境對話、朗讀 3 句英文、記低 5 個實用句型。"/>
+    </aside>
+  </section>
 }
 
 function Loading(){ return <div className="loading"><Sparkles/> AI 老師正在準備教材...</div> }
