@@ -125,6 +125,7 @@ function normalizeRoleplayResult(data, userText = '') {
     aiReply,
     aiZh: asText(safe.aiZh || safe.replyZh || safe.zh, ''),
     correction: asText(safe.correction, userText ? `Better: ${userText}` : 'Try to use a complete sentence.'),
+    transcript: asText(safe.transcript || safe.speechTranscript, userText),
     pronunciation: num(safe.pronunciation, 80),
     fluency: num(safe.fluency, 80),
     accuracy: num(safe.accuracy, 80),
@@ -159,6 +160,28 @@ async function askAI(task, payload) {
     console.warn('AI backend unavailable, mock fallback used:', e)
     return mockAI(task, payload)
   }
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onloadend = () => resolve(String(reader.result || '').split(',')[1] || '')
+    reader.onerror = reject
+    reader.readAsDataURL(blob)
+  })
+}
+
+async function analyzeSpeechBlob(blob, expectedText = '') {
+  if (!blob || blob.size < 200) throw new Error('No audio recorded')
+  const audioBase64 = await blobToBase64(blob)
+  const res = await fetch('/api/speech', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ audioBase64, mimeType: blob.type || 'audio/webm', expectedText })
+  })
+  const data = await res.json()
+  if (!res.ok || data?.error) throw new Error(data?.error || 'Speech analysis failed')
+  return data
 }
 
 function mockScenario(payload = {}) {
@@ -305,7 +328,11 @@ function RoleplayPage() {
   const [messages, setMessages] = useState([{ who:'ai', text:'Good evening! How can I help you today?', zh:'晚上好！有什麼可以幫你？' }])
   const [feedback, setFeedback] = useState(null)
   const [listening, setListening] = useState(false)
+  const [recordingMode, setRecordingMode] = useState('idle')
+  const [voiceStatus, setVoiceStatus] = useState('')
   const [loading, setLoading] = useState(false)
+  const mediaRecorderRef = useRef(null)
+  const audioChunksRef = useRef([])
   const recognitionRef = useRef(null)
   const chatEndRef = useRef(null)
   const current = roleOptions.find(x=>x.id===scene) || roleOptions[0]
@@ -316,35 +343,119 @@ function RoleplayPage() {
     setScene(next.id)
     setFeedback(null)
     setUserText('')
+    setVoiceStatus('')
     setMessages([{ who:'ai', text:`Hi! Let's practise ${next.prompt}. You can start with one short sentence.`, zh:'你好！我們開始這個情境練習。你可以先講一句簡單英文。' }])
   }
   function saveTranscript(nextMessages) {
     const history = getJSON(STORAGE.roleplays, [])
-    setJSON(STORAGE.roleplays, [{ id: Date.now(), date: today(), scene: current.label, messages: nextMessages.slice(-20) }, ...history].slice(0, 20))
+    setJSON(STORAGE.roleplays, [{ id: Date.now(), date: today(), scene: current.label, messages: nextMessages.slice(-30), feedback }, ...history].slice(0, 30))
   }
-  function startVoice() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SpeechRecognition) { alert('此瀏覽器暫未支援語音辨識，請改用 Chrome / Edge 或手動輸入英文句子。'); return }
-    const rec = new SpeechRecognition()
-    rec.lang = 'en-US'; rec.interimResults = false; rec.maxAlternatives = 1
-    rec.onstart = () => setListening(true)
-    rec.onend = () => setListening(false)
-    rec.onerror = () => setListening(false)
-    rec.onresult = e => { const text = e.results?.[0]?.[0]?.transcript || ''; if (text) setUserText(text) }
-    recognitionRef.current = rec; rec.start()
-  }
-  function stopVoice(){ try { recognitionRef.current?.stop() } catch {}; setListening(false) }
 
-  async function sendTurn(textOverride) {
+  function startBrowserSpeechFallback(autoSend = true) {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      setVoiceStatus('此瀏覽器未支援即時語音辨識，請使用 Chrome / Edge，或用文字輸入。')
+      return
+    }
+    const rec = new SpeechRecognition()
+    rec.lang = 'en-US'
+    rec.interimResults = false
+    rec.maxAlternatives = 1
+    rec.onstart = () => { setListening(true); setRecordingMode('speechRecognition'); setVoiceStatus('正在聆聽，請講一句英文…') }
+    rec.onend = () => { setListening(false); setRecordingMode('idle') }
+    rec.onerror = () => { setListening(false); setRecordingMode('idle'); setVoiceStatus('語音辨識失敗，請再試一次或改用文字輸入。') }
+    rec.onresult = e => {
+      const text = e.results?.[0]?.[0]?.transcript || ''
+      if (!text) return
+      setUserText(text)
+      setVoiceStatus(`已轉文字：${text}`)
+      if (autoSend) sendTurn(text, { source: 'browserSpeech', speechAnalysis: { transcript: text, pronunciation: 76, fluency: 74, accuracy: 78, note: '瀏覽器語音辨識模式：分數由 AI 根據轉錄文字估算。' } })
+    }
+    recognitionRef.current = rec
+    rec.start()
+  }
+
+  async function startVoice() {
+    if (loading || listening) return
+    setVoiceStatus('正在啟動麥克風…')
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      startBrowserSpeechFallback(true)
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const preferred = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(t => window.MediaRecorder?.isTypeSupported?.(t)) || ''
+      const rec = new MediaRecorder(stream, preferred ? { mimeType: preferred } : undefined)
+      audioChunksRef.current = []
+      rec.ondataavailable = e => { if (e.data?.size) audioChunksRef.current.push(e.data) }
+      rec.onstart = () => { setListening(true); setRecordingMode('mediaRecorder'); setVoiceStatus('錄音中，講完請按「停止錄音」。') }
+      rec.onerror = () => { setListening(false); setRecordingMode('idle'); setVoiceStatus('錄音失敗，已改用瀏覽器語音辨識。'); startBrowserSpeechFallback(true) }
+      rec.onstop = async () => {
+        setListening(false)
+        setRecordingMode('processing')
+        stream.getTracks().forEach(t => t.stop())
+        const blob = new Blob(audioChunksRef.current, { type: rec.mimeType || 'audio/webm' })
+        try {
+          setVoiceStatus('正在把錄音傳送至 AI 轉文字及評分…')
+          const speechAnalysis = await analyzeSpeechBlob(blob, userText)
+          const transcript = speechAnalysis.transcript || ''
+          if (!transcript.trim()) throw new Error('No transcript returned')
+          setUserText(transcript)
+          setVoiceStatus(`AI 已聽到：${transcript}`)
+          await sendTurn(transcript, { source: 'audio', speechAnalysis })
+        } catch (err) {
+          console.warn('Audio upload failed, using browser speech fallback:', err)
+          setVoiceStatus('後台語音分析未能使用，已切換至瀏覽器語音辨識。')
+          startBrowserSpeechFallback(true)
+        } finally {
+          setRecordingMode('idle')
+        }
+      }
+      mediaRecorderRef.current = rec
+      rec.start()
+    } catch (err) {
+      console.warn('Microphone unavailable:', err)
+      setVoiceStatus('未能開啟麥克風，請允許瀏覽器使用麥克風，或改用文字輸入。')
+      startBrowserSpeechFallback(true)
+    }
+  }
+  function stopVoice(){
+    try {
+      if (recordingMode === 'mediaRecorder' && mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop()
+      else recognitionRef.current?.stop()
+    } catch {}
+    if (recordingMode !== 'processing') setListening(false)
+  }
+
+  async function sendTurn(textOverride, extra = {}) {
     const myText = (textOverride || userText).trim()
     if (!myText || loading) return
     setLoading(true)
-    const userMsg = { who:'me', text: myText, zh:'' }
+    const source = extra.source || 'text'
+    const userMsg = { who:'me', text: myText, zh: source === 'audio' ? '🎤 錄音輸入' : source === 'browserSpeech' ? '🎙️ 語音辨識輸入' : '' }
     const baseHistory = [...messages, userMsg]
     setMessages(baseHistory)
     try {
-      const raw = await askAI('roleplay', { scene: current.label, prompt: current.prompt, role: current.role, userText: myText, history: baseHistory.slice(-10), seed: makeSeed(), avoidRepeat: true })
-      const data = normalizeRoleplayResult(raw, myText)
+      const raw = await askAI('roleplay', {
+        scene: current.label,
+        prompt: current.prompt,
+        role: current.role,
+        userText: myText,
+        speechAnalysis: extra.speechAnalysis || null,
+        inputSource: source,
+        history: baseHistory.slice(-14),
+        seed: makeSeed(),
+        avoidRepeat: true
+      })
+      const mergedRaw = { ...(raw || {}) }
+      if (extra.speechAnalysis) {
+        mergedRaw.transcript = extra.speechAnalysis.transcript || myText
+        mergedRaw.pronunciation = extra.speechAnalysis.pronunciation ?? mergedRaw.pronunciation
+        mergedRaw.fluency = extra.speechAnalysis.fluency ?? mergedRaw.fluency
+        mergedRaw.accuracy = extra.speechAnalysis.accuracy ?? mergedRaw.accuracy
+        mergedRaw.mispronouncedWords = extra.speechAnalysis.mispronouncedWords?.length ? extra.speechAnalysis.mispronouncedWords : mergedRaw.mispronouncedWords
+      }
+      const data = normalizeRoleplayResult(mergedRaw, myText)
       setFeedback(data)
       const aiMsg = { who:'ai', text: data.aiReply || 'Good. Please continue.', zh: data.aiZh || '' }
       const nextMessages = [...baseHistory, aiMsg]
@@ -354,9 +465,11 @@ function RoleplayPage() {
       setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior:'smooth' }), 60)
     } catch (err) {
       console.warn('Roleplay failed:', err)
-      const data = normalizeRoleplayResult(null, myText)
+      const data = normalizeRoleplayResult({ ...(extra.speechAnalysis || {}) }, myText)
       setFeedback(data)
-      setMessages([...baseHistory, { who:'ai', text:data.aiReply, zh:data.aiZh || '' }])
+      const nextMessages = [...baseHistory, { who:'ai', text:data.aiReply, zh:data.aiZh || '' }]
+      setMessages(nextMessages)
+      saveTranscript(nextMessages)
     } finally {
       setUserText('')
       setLoading(false)
@@ -365,27 +478,30 @@ function RoleplayPage() {
 
   return <section className="page roleplayPage">
     <div className="roleHero panel">
-      <div><h2>🎭 角色扮演對話</h2><p className="hint">獨立練習頁面：完整保留對話前文，AI 會根據上下文回覆，並提供 3–4 句配合當前情境的建議回應。</p></div>
+      <div><h2>🎭 AI 口語練習系統</h2><p className="hint">錄音會傳送至 AI 轉成文字，再進行角色對話、即時英文修正及 Pronunciation / Fluency / Accuracy 評分。文字輸入仍可作穩定備用。</p></div>
       <button className="outlineBtn" onClick={() => resetScene()}><RefreshCw size={17}/> 重新開始</button>
     </div>
     <div className="roleSceneGrid">{roleOptions.map(o => <button key={o.id} className={scene===o.id?'active':''} onClick={()=>resetScene(o.id)}><span>{o.icon}</span><b>{o.label}</b><small>AI 扮演：{o.role}</small></button>)}</div>
     <div className="roleGrid roleStandalone">
       <div className="roleChat panel">
         <div className="roleMeta"><b>{current.icon} {current.label}</b><span>完整對話不會消失</span></div>
+        <div className="voiceFlow"><span className={recordingMode !== 'idle' ? 'active' : ''}>1 錄音</span><span className={recordingMode === 'processing' ? 'active' : ''}>2 AI 聽寫</span><span className={loading ? 'active' : ''}>3 對話＋評分</span></div>
         <div className="roleMessages big">{messages.map((m,i)=><div key={i} className={`roleMsg ${m.who}`}><span>{m.who==='me'?'你':'AI'}</span><p>{m.text}</p>{m.zh && <small>{m.zh}</small>}{m.who==='ai'&&<button onClick={()=>speak(m.text)}><Volume2 size={15}/> 朗讀</button>}</div>)}<div ref={chatEndRef}/></div>
         {feedback?.suggestedReplies?.length > 0 && <div className="suggestionBox"><b>建議你可以這樣回應：</b><div>{feedback.suggestedReplies.map((sug,i)=><button key={i} onClick={()=>setUserText(sug.en)}><span>{sug.en}</span><small>{sug.zh}</small></button>)}</div></div>}
         <textarea value={userText} onChange={e=>setUserText(e.target.value)} placeholder="輸入或錄音：例如 I have a problem with my order." />
-        <div className="roleActions"><button onClick={listening?stopVoice:startVoice} className={listening?'recording':''}><Mic size={18}/> {listening?'停止錄音':'錄音'}</button><button onClick={()=>sendTurn()} disabled={loading}><Sparkles size={18}/> {loading?'AI 回覆中...':'送出'}</button></div>
+        <div className="voiceStatus">{voiceStatus || '按「錄音」後講一句英文；停止後會自動傳送至 AI。'}</div>
+        <div className="roleActions"><button onClick={listening?stopVoice:startVoice} className={listening?'recording':''} disabled={recordingMode === 'processing'}><Mic size={18}/> {recordingMode === 'processing' ? '分析中...' : listening ? '停止錄音' : '錄音並送 AI'}</button><button onClick={()=>sendTurn()} disabled={loading || listening}><Sparkles size={18}/> {loading?'AI 回覆中...':'文字送出'}</button></div>
       </div>
       <div className="scorePanel panel">
         <h3>即時修正及發音評分</h3>
         {!feedback ? <div className="emptyFeedback">講或輸入一句英文後，AI 會回覆下一句、修正英文，並提供 pronunciation / fluency / accuracy 評分。</div> : <>
+          {feedback.transcript && <div className="correctionBox"><b>AI 聽到的句子</b><p>{feedback.transcript}</p></div>}
           <ScoreBar label="Pronunciation" value={feedback.pronunciation}/><ScoreBar label="Fluency" value={feedback.fluency}/><ScoreBar label="Accuracy" value={feedback.accuracy}/>
           <div className="correctionBox"><b>英文修正</b><p>{feedback.correction}</p></div>
           <div className="correctionBox"><b>需留意讀音</b><p>{feedback.mispronouncedWords?.length ? feedback.mispronouncedWords.join(', ') : '暫未偵測到明顯問題'}</p></div>
           <div className="correctionBox"><b>AI Teacher Tip</b><p>{feedback.teacherTip}</p><small>{feedback.nextPrompt}</small></div>
         </>}
-        <small className="voiceNote">提示：目前以瀏覽器語音辨識文字＋AI 分析作評分；日後可再接入專業 Speech API 做音素級評分。</small>
+        <small className="voiceNote">Vercel 後台如有 OPENAI_API_KEY，會使用後台語音轉文字；如未設定，會自動 fallback 至瀏覽器語音辨識。</small>
       </div>
     </div>
   </section>

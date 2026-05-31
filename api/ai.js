@@ -96,8 +96,10 @@ Scene: ${payload?.scene || 'Restaurant'}
 Situation: ${payload?.prompt || 'ordering food'}
 You act as: ${payload?.role || 'waiter'}
 Learner said: ${payload?.userText || ''}
+Input source: ${payload?.inputSource || 'text'}
+Speech analysis from audio/transcription service: ${JSON.stringify(payload?.speechAnalysis || {})}
 Recent conversation: ${JSON.stringify(payload?.history || [])}
-Reply as the other person in 1 short natural English sentence, and keep the conversation moving in a fresh direction. Then correct the learner's English. Score the learner based on the transcribed sentence.
+Reply as the other person in 1 short natural English sentence, and keep the conversation moving in a fresh direction. Then correct the learner's English. If speechAnalysis exists, use its transcript and scores as the main basis for pronunciation / fluency / accuracy. If not, estimate scores from the learner's written sentence and clearly avoid pretending to hear the audio.
 Return JSON with exactly these keys:
 {
   "aiReply":"",
@@ -114,6 +116,8 @@ Return JSON with exactly these keys:
 Rules:
 - aiReply must be the next natural line from the other person and must match the full conversation history.
 - suggestedReplies must be 3 to 4 possible learner replies that directly answer aiReply. Do not give unrelated generic sentences.
+- correction should include a better version of the learner's sentence plus a short Traditional Chinese explanation.
+- mispronouncedWords should focus on words likely unclear in the transcript or supplied by speechAnalysis.
 - Never restart the conversation unless history is empty.
 Use Traditional Chinese for explanations. Keep it encouraging and practical.`
   }
