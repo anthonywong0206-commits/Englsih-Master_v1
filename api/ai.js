@@ -19,6 +19,28 @@ Return JSON with exactly these keys:
 }`
   }
 
+  if (task === 'roleplay') {
+    return `You are running a live English role-play speaking practice.
+Scene: ${payload?.scene || 'Restaurant'}
+Situation: ${payload?.prompt || 'ordering food'}
+You act as: ${payload?.role || 'waiter'}
+Learner said: ${payload?.userText || ''}
+Recent conversation: ${JSON.stringify(payload?.history || [])}
+Reply as the other person in 1 short natural English sentence. Then correct the learner's English. Score the learner based on the transcribed sentence.
+Return JSON with exactly these keys:
+{
+  "aiReply":"",
+  "correction":"",
+  "pronunciation":80,
+  "fluency":80,
+  "accuracy":80,
+  "mispronouncedWords":[],
+  "teacherTip":"",
+  "nextPrompt":""
+}
+Use Traditional Chinese for explanations. Keep it encouraging and practical.`
+  }
+
   if (task === 'dictionary') {
     return `Analyze this English word for learners: ${payload?.word || 'environment'}.
 Return JSON with exactly these keys:
