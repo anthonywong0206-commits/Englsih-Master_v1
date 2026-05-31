@@ -28,6 +28,59 @@ function setJSON(key, value) { localStorage.setItem(key, JSON.stringify(value)) 
 function today() { return new Date().toISOString().slice(0, 10) }
 
 function makeSeed() { return `${Date.now()}-${Math.floor(Math.random() * 1000000)}` }
+
+function asArray(value) {
+  if (Array.isArray(value)) return value
+  if (value === undefined || value === null || value === '') return []
+  return [String(value)]
+}
+function asText(value, fallback = '') {
+  if (typeof value === 'string') return value
+  if (value === undefined || value === null) return fallback
+  try { return String(value) } catch { return fallback }
+}
+function normalizeScenarioResult(data, fallbackScenario) {
+  const base = fallbackScenario || SCENARIOS[0]
+  const fallback = mockScenario({ scenarioId: base.id })
+  const safe = data && typeof data === 'object' && !Array.isArray(data) ? data : {}
+  const lines = asArray(safe.lines).map((line, i) => {
+    const obj = line && typeof line === 'object' ? line : { en: String(line || '') }
+    const role = obj.role === 'you' || obj.role === 'other' ? obj.role : (i % 2 === 0 ? 'you' : 'other')
+    return {
+      speaker: asText(obj.speaker, role === 'you' ? '你 (You)' : `對方 (${base.role || 'AI'})`),
+      role,
+      en: asText(obj.en || obj.english || obj.text, fallback.lines[i]?.en || ''),
+      zh: asText(obj.zh || obj.chinese || obj.translation, fallback.lines[i]?.zh || '')
+    }
+  }).filter(x => x.en || x.zh)
+  const vocabulary = asArray(safe.vocabulary).map(v => {
+    const obj = v && typeof v === 'object' ? v : { word: String(v || '') }
+    return { word: asText(obj.word, ''), zh: asText(obj.zh || obj.translation, ''), note: asText(obj.note || obj.example || obj.meaning, '') }
+  }).filter(v => v.word || v.zh || v.note)
+  return {
+    title: asText(safe.title, fallback.title),
+    situation: asText(safe.situation || safe.description, fallback.situation),
+    lines: lines.length ? lines : fallback.lines,
+    keySentences: asArray(safe.keySentences || safe.key_sentences || safe.sentences).map(x => asText(x)).filter(Boolean).slice(0, 8) || fallback.keySentences,
+    vocabulary: vocabulary.length ? vocabulary : fallback.vocabulary,
+    tips: asArray(safe.tips).map(x => asText(x)).filter(Boolean).slice(0, 8) || fallback.tips,
+    practice: asArray(safe.practice || safe.exercises).map(x => asText(x)).filter(Boolean).slice(0, 8) || fallback.practice
+  }
+}
+function normalizeRoleplayResult(data) {
+  const safe = data && typeof data === 'object' && !Array.isArray(data) ? data : {}
+  const num = (v, f) => Math.max(0, Math.min(100, Number.isFinite(Number(v)) ? Number(v) : f))
+  return {
+    aiReply: asText(safe.aiReply || safe.reply, 'Good. Please continue.'),
+    correction: asText(safe.correction, 'Try to use a complete sentence.'),
+    pronunciation: num(safe.pronunciation, 80),
+    fluency: num(safe.fluency, 80),
+    accuracy: num(safe.accuracy, 80),
+    mispronouncedWords: asArray(safe.mispronouncedWords || safe.wordsToImprove).map(x => asText(x)).filter(Boolean).slice(0, 8),
+    teacherTip: asText(safe.teacherTip || safe.tip, 'Keep practising with short and clear sentences.'),
+    nextPrompt: asText(safe.nextPrompt, 'Please continue the conversation.')
+  }
+}
 function recentScenarioTitles(limit = 12) { return getJSON(STORAGE.scenarios, []).slice(0, limit).map(x => x.title).filter(Boolean) }
 function recentReadingTitles(limit = 8) { return getJSON(STORAGE.readings, []).slice(0, limit).map(x => x.title).filter(Boolean) }
 function updateStats(type) {
@@ -138,13 +191,20 @@ function ScenarioHome() {
   const scenario = SCENARIOS.find(x => x.id === selected) || SCENARIOS[0]
   async function generate(id = selected) {
     setLoading(true)
-    const s = SCENARIOS.find(x => x.id === id) || scenario
-    const data = await askAI('scenario', { scenarioId: id, title: s.title, prompt: s.prompt, role: s.role, seed: makeSeed(), recentTitles: recentScenarioTitles(), avoidRepeat: true })
-    setResult(data)
-    updateStats('scenario')
-    const history = getJSON(STORAGE.scenarios, [])
-    setJSON(STORAGE.scenarios, [{ title: data.title, date: today(), scenario: s.title }, ...history].slice(0, 30))
-    setLoading(false)
+    const s = SCENARIOS.find(x => x.id === id) || scenario || SCENARIOS[0]
+    try {
+      const raw = await askAI('scenario', { scenarioId: id, title: s.title, prompt: s.prompt, role: s.role, seed: makeSeed(), recentTitles: recentScenarioTitles(), avoidRepeat: true })
+      const data = normalizeScenarioResult(raw, s)
+      setResult(data)
+      updateStats('scenario')
+      const history = getJSON(STORAGE.scenarios, [])
+      setJSON(STORAGE.scenarios, [{ title: data.title || s.title, date: today(), scenario: s.title }, ...history].slice(0, 30))
+    } catch (err) {
+      console.warn('Scenario generation failed:', err)
+      setResult(normalizeScenarioResult(null, s))
+    } finally {
+      setLoading(false)
+    }
   }
   function speak(text) { try { const u = new SpeechSynthesisUtterance(text); u.lang = 'en-US'; window.speechSynthesis.speak(u) } catch {} }
   return <section className="mobilePage">
@@ -215,12 +275,21 @@ function RoleplayLab({ scenario }) {
     setLoading(true)
     const myText = userText.trim()
     setMessages(m => [...m, { who:'me', text: myText }])
-    const data = await askAI('roleplay', { scene: current.label, prompt: current.prompt, role: current.role, userText: myText, history: messages.slice(-6), seed: makeSeed(), avoidRepeat: true })
-    setFeedback(data)
-    setMessages(m => [...m, { who:'ai', text: data.aiReply || 'Good. Please continue.' }])
-    setUserText('')
-    setLoading(false)
-    if (data.aiReply) speak(data.aiReply)
+    try {
+      const raw = await askAI('roleplay', { scene: current.label, prompt: current.prompt, role: current.role, userText: myText, history: messages.slice(-6), seed: makeSeed(), avoidRepeat: true })
+      const data = normalizeRoleplayResult(raw)
+      setFeedback(data)
+      setMessages(m => [...m, { who:'ai', text: data.aiReply || 'Good. Please continue.' }])
+      if (data.aiReply) speak(data.aiReply)
+    } catch (err) {
+      console.warn('Roleplay failed:', err)
+      const data = normalizeRoleplayResult(null)
+      setFeedback(data)
+      setMessages(m => [...m, { who:'ai', text: data.aiReply }])
+    } finally {
+      setUserText('')
+      setLoading(false)
+    }
   }
 
   return <section className="roleplayLab" id="roleplayLab">
@@ -376,7 +445,7 @@ function Learning() {
 function Loading(){ return <div className="loading"><Sparkles/> AI 老師正在準備教材...</div> }
 function Stat({label,value}){ return <div className="stat"><b>{value}</b><span>{label}</span></div> }
 function Block({title,items}){ return <div><h3>{title}</h3><ul className="niceList">{items?.map((x,i)=><li key={i}>{x}</li>)}</ul></div> }
-function LessonBlock({icon,title,items}){ return <div className="lessonBlock"><div className="lessonTitle">{icon}<b>{title}</b></div><ul>{items?.map((x,i)=><li key={i}>{x}</li>)}</ul></div> }
+function LessonBlock({icon,title,items}){ const list = asArray(items).filter(Boolean); return <div className="lessonBlock"><div className="lessonTitle">{icon}<b>{title}</b></div><ul>{list.map((x,i)=><li key={i}>{asText(x)}</li>)}</ul></div> }
 function Teacher({title='AI Teacher',text}){ return <div className="teacher"><GraduationCap size={18}/><div><b>{title}</b><p>{text}</p></div></div> }
 function Select({label,v,set,opts}){ return <label className="select"><span>{label}</span><select value={v} onChange={e=>set(e.target.value)}>{opts.map(o=><option key={o} value={o}>{o}</option>)}</select></label> }
 function TwoCol({leftTitle,rightTitle,left,right}){ return <div className="twoCol"><div><h3>{leftTitle}</h3><p>{left}</p></div><div><h3>{rightTitle}</h3><p>{right}</p></div></div> }
