@@ -67,6 +67,51 @@ function normalizeScenarioResult(data, fallbackScenario) {
     practice: asArray(safe.practice || safe.exercises).map(x => asText(x)).filter(Boolean).slice(0, 8) || fallback.practice
   }
 }
+
+function normalizeReadingResult(data, payload = {}) {
+  const topic = payload.customTopic || payload.topic || 'English'
+  const fallback = mockAI('reading', payload)
+  const safe = data && typeof data === 'object' && !Array.isArray(data) ? data : {}
+
+  // Some AI providers may return text, content, message, or a partially parsed object.
+  const rawText = asText(safe.article || safe.text || safe.content || safe.message, '')
+  const article = asText(safe.article, rawText || fallback.article)
+  const translation = asText(safe.translation || safe.zh || safe.chineseTranslation, fallback.translation)
+
+  const vocabulary = asArray(safe.vocabulary || safe.vocab).map(v => {
+    const obj = v && typeof v === 'object' ? v : { word: String(v || '') }
+    return {
+      word: asText(obj.word || obj.term, ''),
+      pos: asText(obj.pos || obj.partOfSpeech || obj.type, ''),
+      zh: asText(obj.zh || obj.translation || obj.meaning, ''),
+      example: asText(obj.example || obj.sentence || obj.note, '')
+    }
+  }).filter(v => v.word || v.zh || v.example).slice(0, 24)
+
+  const questions = asArray(safe.questions || safe.readingQuestions || safe.quiz).map((q, i) => {
+    const obj = q && typeof q === 'object' ? q : { q: String(q || '') }
+    return {
+      q: asText(obj.q || obj.question || obj.prompt, `Question ${i + 1}`),
+      a: asText(obj.a || obj.answer || obj.explanation, '')
+    }
+  }).filter(q => q.q || q.a).slice(0, 12)
+
+  return {
+    title: asText(safe.title || safe.heading, fallback.title || `${topic} Reading Lesson`),
+    article: article || fallback.article,
+    translation: translation || fallback.translation,
+    vocabulary: vocabulary.length ? vocabulary : asArray(fallback.vocabulary),
+    keyPoints: asArray(safe.keyPoints || safe.key_points || safe.summary || safe.points).map(x => asText(x)).filter(Boolean).slice(0, 12).length
+      ? asArray(safe.keyPoints || safe.key_points || safe.summary || safe.points).map(x => asText(x)).filter(Boolean).slice(0, 12)
+      : asArray(fallback.keyPoints),
+    grammar: asArray(safe.grammar || safe.grammarFocus || safe.grammar_focus).map(x => asText(x)).filter(Boolean).slice(0, 12).length
+      ? asArray(safe.grammar || safe.grammarFocus || safe.grammar_focus).map(x => asText(x)).filter(Boolean).slice(0, 12)
+      : asArray(fallback.grammar),
+    questions: questions.length ? questions : asArray(fallback.questions),
+    teacher: asText(safe.teacher || safe.teacherTip || safe.aiTeacher || safe.explanation, fallback.teacher)
+  }
+}
+
 function normalizeRoleplayResult(data) {
   const safe = data && typeof data === 'object' && !Array.isArray(data) ? data : {}
   const num = (v, f) => Math.max(0, Math.min(100, Number.isFinite(Number(v)) ? Number(v) : f))
@@ -354,10 +399,10 @@ function Reading() {
       words: form.words,
       article: data.article || '',
       translation: data.translation || '',
-      vocabulary: data.vocabulary || [],
-      keyPoints: data.keyPoints || [],
-      grammar: data.grammar || [],
-      questions: data.questions || [],
+      vocabulary: asArray(data.vocabulary),
+      keyPoints: asArray(data.keyPoints),
+      grammar: asArray(data.grammar),
+      questions: asArray(data.questions),
       teacher: data.teacher || ''
     }
     setJSON(STORAGE.readings, [item, ...list].slice(0, 80))
@@ -366,11 +411,21 @@ function Reading() {
   }
   async function generate() {
     setLoading(true)
-    const data = await askAI('reading', { ...form, seed: makeSeed(), recentTitles: recentReadingTitles(), avoidRepeat: true })
-    setResult(data)
-    updateStats('reading')
-    saveReading(data)
-    setLoading(false)
+    try {
+      const payload = { ...form, seed: makeSeed(), recentTitles: recentReadingTitles(), avoidRepeat: true }
+      const raw = await askAI('reading', payload)
+      const data = normalizeReadingResult(raw, payload)
+      setResult(data)
+      updateStats('reading')
+      saveReading(data)
+    } catch (err) {
+      console.warn('Reading generation failed, safe fallback used:', err)
+      const data = normalizeReadingResult(null, form)
+      setResult(data)
+      saveReading(data)
+    } finally {
+      setLoading(false)
+    }
   }
   return <section className="page">
     <div className="panel">
@@ -384,7 +439,7 @@ function Reading() {
     {result && <>
       <article ref={ref} className="panel shareCard">
         <div className="articleHead"><div><h2>{result.title}</h2><p className="hint">已自動加入學習中心，可日後重溫。</p></div><div className="speakTools"><button onClick={() => speakArticle(result.article)}><Volume2 size={17}/> 朗讀文章</button><button className="softMini" onClick={stopSpeak}>停止</button><button className="softMini" onClick={() => saveReading()}><Save size={16}/> 儲存</button></div></div>
-        <TwoCol leftTitle="英文文章" rightTitle="中文翻譯" left={result.article} right={result.translation}/><Vocabulary items={result.vocabulary}/><Block title="Key Points" items={result.keyPoints}/><Block title="Grammar Focus" items={result.grammar}/><h3>Reading Questions</h3>{result.questions?.map((q,i)=><div className="qa" key={i}><b>Q{i+1}. {q.q}</b><p>Answer: {q.a}</p></div>)}<Teacher text={result.teacher}/>
+        <TwoCol leftTitle="英文文章" rightTitle="中文翻譯" left={result.article} right={result.translation}/><Vocabulary items={result.vocabulary}/><Block title="Key Points" items={result.keyPoints}/><Block title="Grammar Focus" items={result.grammar}/><h3>Reading Questions</h3>{asArray(result.questions).map((q,i)=>{ const item = q && typeof q === 'object' ? q : { q: asText(q), a: '' }; return <div className="qa" key={i}><b>Q{i+1}. {asText(item.q || item.question)}</b><p>Answer: {asText(item.a || item.answer)}</p></div> })}<Teacher text={result.teacher}/>
       </article>
       <ShareBox refEl={ref} fileName="ai-reading" />
     </>}
@@ -404,6 +459,7 @@ function Learning() {
   const histories = getJSON(STORAGE.scenarios, [])
   const [readings, setReadings] = useState(getJSON(STORAGE.readings, []))
   const [opened, setOpened] = useState(null)
+  const openedExportRef = useRef(null)
   function clearData(){ if(confirm('確定清空所有學習資料？')){ Object.values(STORAGE).forEach(k=>localStorage.removeItem(k)); location.reload() } }
   function deleteReading(id){ const next = readings.filter(r => r.id !== id); setReadings(next); setJSON(STORAGE.readings, next); if(opened?.id === id) setOpened(null) }
   function speakArticle(text) { try { window.speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text || ''); u.lang = 'en-US'; u.rate = 0.86; window.speechSynthesis.speak(u) } catch {} }
@@ -427,15 +483,18 @@ function Learning() {
     <aside className="panel">
       <h3>文章重溫</h3>
       {!opened && <div className="emptyArticle"><BookOpen/><b>選擇一篇文章</b><p>可以翻看英文、中文翻譯、重點字彙及一鍵朗讀。</p></div>}
-      {opened && <div className="openedArticle">
-        <div className="articleHead small"><div><h2>{opened.title}</h2><p className="hint">{opened.topic} · {opened.level} · {opened.style}</p></div></div>
-        <div className="speakTools full"><button onClick={() => speakArticle(opened.article)}><Volume2 size={17}/> 朗讀文章</button><button className="softMini" onClick={stopSpeak}>停止</button><button className="softMini dangerText" onClick={() => deleteReading(opened.id)}><Trash2 size={16}/> 刪除</button></div>
-        <h4>英文文章</h4><p className="articleText">{opened.article}</p>
-        <h4>中文翻譯</h4><p className="articleText zh">{opened.translation}</p>
-        <Vocabulary items={opened.vocabulary || []}/>
-        <Block title="Key Points" items={opened.keyPoints || []}/>
-        <Block title="Grammar Focus" items={opened.grammar || []}/>
-        <Teacher text={opened.teacher}/>
+      {opened && <div className="openedArticleWrap">
+        <article ref={openedExportRef} className="openedArticle shareCard reviewExportCard">
+          <div className="articleHead small"><div><h2>{opened.title}</h2><p className="hint">{opened.topic} · {opened.level} · {opened.style}</p></div></div>
+          <h4>英文文章</h4><p className="articleText">{opened.article}</p>
+          <h4>中文翻譯</h4><p className="articleText zh">{opened.translation}</p>
+          <Vocabulary items={opened.vocabulary || []}/>
+          <Block title="Key Points" items={opened.keyPoints || []}/>
+          <Block title="Grammar Focus" items={opened.grammar || []}/>
+          <Teacher text={opened.teacher}/>
+        </article>
+        <div className="speakTools full reviewTools"><button onClick={() => speakArticle(opened.article)}><Volume2 size={17}/> 朗讀文章</button><button className="softMini" onClick={stopSpeak}>停止</button><button className="softMini dangerText" onClick={() => deleteReading(opened.id)}><Trash2 size={16}/> 刪除</button></div>
+        <ShareBox refEl={openedExportRef} fileName={`saved-reading-${opened.id || 'article'}`} />
       </div>}
       <h3>AI 後台設定</h3><div className="backendBox"><b>✅ Vercel 後台 API 模式</b><p>API Key 不會放在前端。請到 Vercel Environment Variables 設定：</p><code>AI_PROVIDER=openai</code><code>OPENAI_API_KEY=你的Key</code><code>或 GEMINI_API_KEY=你的Key</code></div><button className="danger" onClick={clearData}><Trash2 size={18}/> 清空資料</button><Teacher title="每日任務" text="完成 1 個情境對話、朗讀 3 句英文、記低 5 個實用句型。"/>
     </aside>
@@ -444,12 +503,12 @@ function Learning() {
 
 function Loading(){ return <div className="loading"><Sparkles/> AI 老師正在準備教材...</div> }
 function Stat({label,value}){ return <div className="stat"><b>{value}</b><span>{label}</span></div> }
-function Block({title,items}){ return <div><h3>{title}</h3><ul className="niceList">{items?.map((x,i)=><li key={i}>{x}</li>)}</ul></div> }
+function Block({title,items}){ const list = asArray(items).map(x => asText(x)).filter(Boolean); return <div><h3>{title}</h3><ul className="niceList">{list.map((x,i)=><li key={i}>{x}</li>)}</ul></div> }
 function LessonBlock({icon,title,items}){ const list = asArray(items).filter(Boolean); return <div className="lessonBlock"><div className="lessonTitle">{icon}<b>{title}</b></div><ul>{list.map((x,i)=><li key={i}>{asText(x)}</li>)}</ul></div> }
 function Teacher({title='AI Teacher',text}){ return <div className="teacher"><GraduationCap size={18}/><div><b>{title}</b><p>{text}</p></div></div> }
 function Select({label,v,set,opts}){ return <label className="select"><span>{label}</span><select value={v} onChange={e=>set(e.target.value)}>{opts.map(o=><option key={o} value={o}>{o}</option>)}</select></label> }
-function TwoCol({leftTitle,rightTitle,left,right}){ return <div className="twoCol"><div><h3>{leftTitle}</h3><p>{left}</p></div><div><h3>{rightTitle}</h3><p>{right}</p></div></div> }
-function Vocabulary({items=[]}){ return <div><h3>Vocabulary</h3><div className="vocabGrid">{items.map((v,i)=><div className="mini" key={i}><b>{v.word}</b><span>{v.pos} · {v.zh}</span><p>{v.example}</p></div>)}</div></div> }
+function TwoCol({leftTitle,rightTitle,left,right}){ return <div className="twoCol"><div><h3>{leftTitle}</h3><p>{asText(left)}</p></div><div><h3>{rightTitle}</h3><p>{asText(right)}</p></div></div> }
+function Vocabulary({items=[]}){ const list = asArray(items).map(v => v && typeof v === 'object' ? v : { word: asText(v), pos: '', zh: '', example: '' }).filter(v => v.word || v.zh || v.example); return <div><h3>Vocabulary</h3><div className="vocabGrid">{list.map((v,i)=><div className="mini" key={i}><b>{asText(v.word)}</b><span>{asText(v.pos)}{v.pos && v.zh ? ' · ' : ''}{asText(v.zh)}</span><p>{asText(v.example || v.note)}</p></div>)}</div></div> }
 function ShareBox({refEl, fileName}) {
   const [exporting, setExporting] = useState(false)
 
