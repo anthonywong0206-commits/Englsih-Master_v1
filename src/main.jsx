@@ -1,9 +1,14 @@
 import React, { useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BookOpen, Languages, Newspaper, UserRound, Sparkles, Download, Image as ImageIcon, Moon, Sun, Save, Wand2, Upload, Trash2, Phone, Utensils, ShoppingBag, Plane, Briefcase, MoreHorizontal, Volume2, Mic, Play, RefreshCw, GraduationCap, Lightbulb, MessageCircle, Headphones, Home } from 'lucide-react'
+import { BookOpen, Languages, Newspaper, UserRound, Sparkles, Download, Image as ImageIcon, Moon, Sun, Save, Wand2, Upload, Trash2, Phone, Utensils, ShoppingBag, Plane, Briefcase, MoreHorizontal, Volume2, Mic, Play, RefreshCw, GraduationCap, Lightbulb, MessageCircle, Headphones, Home, Camera, FileText } from 'lucide-react'
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
+import * as pdfjsLib from 'pdfjs-dist'
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import mammoth from 'mammoth/mammoth.browser'
 import './styles.css'
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker
 
 const STORAGE = {
   words: 'ema_saved_words_v2',
@@ -110,6 +115,47 @@ function normalizeReadingResult(data, payload = {}) {
       : asArray(fallback.grammar),
     questions: questions.length ? questions : asArray(fallback.questions),
     teacher: asText(safe.teacher || safe.teacherTip || safe.aiTeacher || safe.explanation, fallback.teacher)
+  }
+}
+
+
+function normalizeTranslatorResult(data, payload = {}) {
+  const fallback = mockAI('translator', { text: payload.text || '' })
+  const safe = data && typeof data === 'object' && !Array.isArray(data) ? data : {}
+  const original = asText(safe.original || safe.text || safe.extractedText || payload.text, fallback.original)
+  const bilingual = asArray(safe.bilingual || safe.paragraphs || safe.translationPairs).map((b, i) => {
+    const obj = b && typeof b === 'object' ? b : { en: String(b || '') }
+    return {
+      en: asText(obj.en || obj.english || obj.original || obj.text, i === 0 ? original : ''),
+      zh: asText(obj.zh || obj.chinese || obj.translation, '')
+    }
+  }).filter(x => x.en || x.zh)
+  const vocabulary = asArray(safe.vocabulary || safe.vocab).map(v => {
+    const obj = v && typeof v === 'object' ? v : { word: String(v || '') }
+    return {
+      word: asText(obj.word || obj.term, ''),
+      pos: asText(obj.pos || obj.partOfSpeech || obj.type, ''),
+      zh: asText(obj.zh || obj.translation || obj.meaning, ''),
+      example: asText(obj.example || obj.sentence || obj.note, '')
+    }
+  }).filter(v => v.word || v.zh || v.example).slice(0, 24)
+  const questions = asArray(safe.questions || safe.readingQuestions || safe.quiz).map((q, i) => {
+    const obj = q && typeof q === 'object' ? q : { q: String(q || '') }
+    return {
+      q: asText(obj.q || obj.question || obj.prompt, `Question ${i + 1}`),
+      a: asText(obj.a || obj.answer || obj.explanation, '')
+    }
+  }).filter(q => q.q || q.a).slice(0, 12)
+  return {
+    original: original || fallback.original,
+    bilingual: bilingual.length ? bilingual : asArray(fallback.bilingual),
+    vocabulary: vocabulary.length ? vocabulary : asArray(fallback.vocabulary),
+    keyPoints: asArray(safe.keyPoints || safe.key_points || safe.summary || safe.points || fallback.keyPoints).map(x => asText(x)).filter(Boolean).slice(0, 12),
+    grammar: asArray(safe.grammar || safe.grammarFocus || safe.grammar_focus || fallback.grammar).map(x => asText(x)).filter(Boolean).slice(0, 12),
+    questions: questions.length ? questions : asArray(safe.questions || fallback.questions || [{ q: 'What is the main idea?', a: 'Understand the main message of the text.' }]),
+    quick: asText(safe.quick || safe.oneMinuteSummary || safe.summaryText, fallback.quick),
+    teacher: asText(safe.teacher || safe.teacherTip || safe.aiTeacher || safe.explanation, fallback.teacher),
+    sourceName: asText(safe.sourceName || payload.fileName || '', '')
   }
 }
 
@@ -591,11 +637,135 @@ function Reading() {
 }
 
 function Translator() {
-  const [text,setText] = useState('Learning English is easier when you read with purpose.')
-  const [result,setResult] = useState(null); const [loading,setLoading] = useState(false); const ref = useRef(null)
-  async function analyze(){ setLoading(true); const data = await askAI('translator',{text}); setResult(data); updateStats('translation'); setLoading(false) }
-  function loadFile(e){ const file=e.target.files?.[0]; if(!file) return; const reader=new FileReader(); reader.onload=()=>setText(String(reader.result||'')); reader.readAsText(file) }
-  return <section className="page"><div className="panel"><h2>🌏 AI Translator</h2><p className="hint">貼上英文文章，AI 會做中英對照翻譯及重點教學。</p><textarea value={text} onChange={e=>setText(e.target.value)} placeholder="貼上英文文章..."/><div className="actionRow"><label className="upload"><Upload size={18}/> 上傳 TXT<input type="file" accept=".txt,.md" onChange={loadFile}/></label><button className="primary" onClick={analyze}><Sparkles size={18}/> 開始分析</button></div></div>{loading && <Loading/>}{result && <><article ref={ref} className="panel shareCard"><h2>中英對照教材</h2><h3>原文</h3><p>{result.original}</p><h3>段落翻譯</h3>{result.bilingual?.map((b,i)=><TwoCol key={i} leftTitle={`Original ${i+1}`} rightTitle="中文" left={b.en} right={b.zh}/>) }<h3>重要字彙</h3><div className="vocabGrid">{result.vocabulary?.map(v=><div className="mini" key={v.word}><b>{v.word}</b><span>{v.zh}</span><p>{v.note}</p></div>)}</div><Block title="Grammar Analysis" items={result.grammar}/><Block title="Key Learning Points" items={result.keyPoints}/><Teacher title="一分鐘速讀版" text={result.quick}/><Teacher text={result.teacher}/></article><ShareBox refEl={ref} fileName="translator-learning" /></>}</section>
+  const [text, setText] = useState('Learning English is easier when you read with purpose.')
+  const [result, setResult] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [fileInfo, setFileInfo] = useState(null)
+  const [extracting, setExtracting] = useState(false)
+  const ref = useRef(null)
+
+  async function readPDF(file) {
+    const buffer = await file.arrayBuffer()
+    const pdf = await pdfjsLib.getDocument({ data: buffer }).promise
+    const pages = []
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i)
+      const content = await page.getTextContent()
+      const pageText = content.items.map(item => item.str).join(' ').replace(/\s+/g, ' ').trim()
+      if (pageText) pages.push(pageText)
+    }
+    return pages.join('\n\n')
+  }
+
+  async function readWord(file) {
+    const buffer = await file.arrayBuffer()
+    const output = await mammoth.extractRawText({ arrayBuffer: buffer })
+    return (output.value || '').trim()
+  }
+
+  async function readPlainText(file) {
+    return await file.text()
+  }
+
+  function fileToDataURL(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result || ''))
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
+  }
+
+  async function handleImport(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setExtracting(true)
+    setResult(null)
+    setFileInfo({ name: file.name, type: file.type || 'file', status: '讀取中...' })
+    try {
+      const lower = file.name.toLowerCase()
+      let extractedText = ''
+      if (file.type.startsWith('image/')) {
+        const imageData = await fileToDataURL(file)
+        setFileInfo({ name: file.name, type: file.type, status: '圖片已匯入，AI 正在讀取文字...' })
+        setLoading(true)
+        const raw = await askAI('translatorImage', { imageData, mimeType: file.type, fileName: file.name, seed: makeSeed(), avoidRepeat: true })
+        const data = normalizeTranslatorResult(raw, { fileName: file.name })
+        setText(data.original)
+        setResult(data)
+        updateStats('translation')
+        return
+      } else if (file.type === 'application/pdf' || lower.endsWith('.pdf')) {
+        extractedText = await readPDF(file)
+      } else if (lower.endsWith('.docx')) {
+        extractedText = await readWord(file)
+      } else if (lower.endsWith('.doc')) {
+        alert('舊式 .doc 暫未支援，請先另存為 .docx 或 PDF 再上傳。')
+        return
+      } else {
+        extractedText = await readPlainText(file)
+      }
+      if (!extractedText.trim()) throw new Error('未能從檔案讀取文字，請嘗試拍照／截圖或貼上文字。')
+      setText(extractedText.slice(0, 18000))
+      setFileInfo({ name: file.name, type: file.type || 'file', status: `已讀取約 ${extractedText.length} 個字元` })
+    } catch (err) {
+      console.warn('File import failed:', err)
+      setFileInfo({ name: file.name, type: file.type || 'file', status: '讀取失敗' })
+      alert(err.message || '檔案讀取失敗，請改用文字貼上或圖片匯入。')
+    } finally {
+      setExtracting(false)
+      setLoading(false)
+      e.target.value = ''
+    }
+  }
+
+  async function analyze() {
+    const sourceText = text.trim()
+    if (!sourceText) { alert('請先貼上文字，或上傳 PDF / Word / 圖片。'); return }
+    setLoading(true)
+    try {
+      const raw = await askAI('translator', { text: sourceText.slice(0, 18000), fileName: fileInfo?.name || '', seed: makeSeed(), avoidRepeat: true })
+      const data = normalizeTranslatorResult(raw, { text: sourceText, fileName: fileInfo?.name || '' })
+      setResult(data)
+      updateStats('translation')
+    } catch (err) {
+      console.warn('Translator analysis failed:', err)
+      const data = normalizeTranslatorResult(null, { text: sourceText, fileName: fileInfo?.name || '' })
+      setResult(data)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return <section className="page">
+    <div className="panel translatorPanel">
+      <h2>🌏 AI Translator</h2>
+      <p className="hint">支援貼上文字、PDF、Word DOCX、拍照及相片匯入。AI 會讀取內容，生成中英翻譯、Vocabulary、Key Points、Grammar Focus 及 Reading Questions。</p>
+      <div className="importGrid">
+        <label className="importCard"><FileText size={24}/><b>上傳 PDF</b><span>讀取 PDF 文字</span><input type="file" accept="application/pdf,.pdf" onChange={handleImport}/></label>
+        <label className="importCard"><FileText size={24}/><b>上傳 Word</b><span>支援 .docx</span><input type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={handleImport}/></label>
+        <label className="importCard"><ImageIcon size={24}/><b>相片匯入</b><span>AI 讀圖取字</span><input type="file" accept="image/*" onChange={handleImport}/></label>
+        <label className="importCard"><Camera size={24}/><b>拍照匯入</b><span>手機相機拍攝</span><input type="file" accept="image/*" capture="environment" onChange={handleImport}/></label>
+      </div>
+      {fileInfo && <div className="fileInfo"><b>{fileInfo.name}</b><span>{fileInfo.status}</span></div>}
+      <textarea value={text} onChange={e=>setText(e.target.value)} placeholder="貼上英文文章，或上傳 PDF / Word / 圖片後在這裡檢查文字..."/>
+      <div className="actionRow"><label className="upload"><Upload size={18}/> 上傳 TXT<input type="file" accept=".txt,.md,.csv" onChange={handleImport}/></label><button className="primary" onClick={analyze} disabled={loading || extracting}><Sparkles size={18}/> {loading ? 'AI 分析中...' : extracting ? '讀取中...' : '開始分析'}</button></div>
+    </div>
+    {(loading || extracting) && <Loading/>}
+    {result && <>
+      <article ref={ref} className="panel shareCard">
+        <div className="articleHead"><div><h2>中英對照學習教材</h2>{result.sourceName && <p className="hint">來源：{result.sourceName}</p>}</div></div>
+        <h3>原文</h3><p>{result.original}</p>
+        <h3>段落翻譯</h3>{asArray(result.bilingual).map((b,i)=>{ const item = b && typeof b === 'object' ? b : { en: asText(b), zh: '' }; return <TwoCol key={i} leftTitle={`Original ${i+1}`} rightTitle="中文" left={item.en} right={item.zh}/> })}
+        <Vocabulary items={result.vocabulary}/>
+        <Block title="Key Points" items={result.keyPoints}/>
+        <Block title="Grammar Focus" items={result.grammar}/>
+        <h3>Reading Questions</h3>{asArray(result.questions).map((q,i)=>{ const item = q && typeof q === 'object' ? q : { q: asText(q), a: '' }; return <div className="qa" key={i}><b>Q{i+1}. {asText(item.q || item.question)}</b><p>Answer: {asText(item.a || item.answer)}</p></div> })}
+        <Teacher title="一分鐘速讀版" text={result.quick}/><Teacher text={result.teacher}/>
+      </article>
+      <ShareBox refEl={ref} fileName="translator-learning" />
+    </>}
+  </section>
 }
 
 function Learning() {

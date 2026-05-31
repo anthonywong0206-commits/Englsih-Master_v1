@@ -167,16 +167,38 @@ Return JSON with exactly these keys:
 }`
   }
 
+  if (task === 'translatorImage') {
+    return `Read the uploaded image and turn it into an English learning material.${noRepeat}
+File name: ${payload?.fileName || 'image'}
+Instructions:
+- First extract all readable English text from the image.
+- If the image contains both English and Chinese, focus on the English parts but preserve useful context.
+- Then create a bilingual English learning worksheet in Traditional Chinese.
+Return JSON with exactly these keys:
+{
+  "original":"",
+  "bilingual":[{"en":"","zh":""}],
+  "vocabulary":[{"word":"","pos":"","zh":"","example":""}],
+  "keyPoints":[],
+  "grammar":[],
+  "questions":[{"q":"","a":""}],
+  "quick":"",
+  "teacher":""
+}`
+  }
+
   return `Analyze this English article as a learning material, not only translation.${noRepeat}
+Source file: ${payload?.fileName || 'pasted text'}
 Article:
 ${payload?.text || ''}
 Return JSON with exactly these keys:
 {
   "original":"",
   "bilingual":[{"en":"","zh":""}],
-  "vocabulary":[{"word":"","zh":"","note":""}],
+  "vocabulary":[{"word":"","pos":"","zh":"","example":""}],
   "grammar":[],
   "keyPoints":[],
+  "questions":[{"q":"","a":""}],
   "quick":"",
   "teacher":""
 }`
@@ -243,6 +265,55 @@ async function callGemini(prompt, task) {
   return extractJSON(data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}')
 }
 
+
+async function callOpenAIImage(prompt, payload, task) {
+  const key = process.env.OPENAI_API_KEY
+  if (!key) throw new Error('Missing OPENAI_API_KEY')
+  if (!payload?.imageData) throw new Error('Missing image data')
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      model: process.env.OPENAI_VISION_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      temperature: temperatureFor(task),
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: payload.imageData } }
+        ] }
+      ]
+    })
+  })
+  const data = await response.json()
+  if (!response.ok) throw new Error(data?.error?.message || 'OpenAI image request failed')
+  return extractJSON(data?.choices?.[0]?.message?.content || '{}')
+}
+
+async function callGeminiImage(prompt, payload, task) {
+  const key = process.env.GEMINI_API_KEY
+  if (!key) throw new Error('Missing GEMINI_API_KEY')
+  if (!payload?.imageData) throw new Error('Missing image data')
+  const model = process.env.GEMINI_MODEL || 'gemini-1.5-flash-latest'
+  const [meta, base64] = String(payload.imageData).split(',')
+  const mimeType = payload.mimeType || (meta.match(/data:(.*?);base64/)?.[1]) || 'image/jpeg'
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      generationConfig: { temperature: temperatureFor(task), responseMimeType: 'application/json' },
+      contents: [{ parts: [
+        { text: `${SYSTEM_PROMPT}\n\n${prompt}` },
+        { inlineData: { mimeType, data: base64 } }
+      ] }]
+    })
+  })
+  const data = await response.json()
+  if (!response.ok) throw new Error(data?.error?.message || 'Gemini image request failed')
+  return extractJSON(data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}')
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
@@ -253,9 +324,9 @@ export default async function handler(req, res) {
     const provider = (process.env.AI_PROVIDER || 'openai').toLowerCase()
     const prompt = buildInstruction(task, payload)
 
-    const result = provider === 'gemini'
-      ? await callGemini(prompt, task)
-      : await callOpenAI(prompt, task)
+    const result = task === 'translatorImage'
+      ? (provider === 'gemini' ? await callGeminiImage(prompt, payload, task) : await callOpenAIImage(prompt, payload, task))
+      : (provider === 'gemini' ? await callGemini(prompt, task) : await callOpenAI(prompt, task))
 
     return res.status(200).json(result)
   } catch (error) {

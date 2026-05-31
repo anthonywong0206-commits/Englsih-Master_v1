@@ -15,7 +15,9 @@
     "react-dom": "latest",
     "html2canvas": "latest",
     "jspdf": "latest",
-    "lucide-react": "latest"
+    "lucide-react": "latest",
+    "pdfjs-dist": "latest",
+    "mammoth": "latest"
   },
   "devDependencies": {}
 }
