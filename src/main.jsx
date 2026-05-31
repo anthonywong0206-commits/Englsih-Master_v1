@@ -13,8 +13,7 @@ const STORAGE = {
 }
 
 const defaultSettings = {
-  provider: 'mock',
-  apiKey: '',
+  provider: 'backend',
   theme: 'dark'
 }
 
@@ -24,36 +23,20 @@ function getJSON(key, fallback) {
 function setJSON(key, value) { localStorage.setItem(key, JSON.stringify(value)) }
 
 async function askAI(task, payload) {
-  const settings = getJSON(STORAGE.settings, defaultSettings)
-  if (!settings.apiKey || settings.provider === 'mock') return mockAI(task, payload)
-
-  const system = `You are English Master AI, a bilingual English teacher for Hong Kong learners. Return clean JSON only. Teach in Traditional Chinese and English.`
-  const user = JSON.stringify({ task, payload })
-
   try {
-    if (settings.provider === 'openai') {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.apiKey}` },
-        body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], temperature: 0.7 })
-      })
-      const data = await res.json()
-      return JSON.parse(data.choices?.[0]?.message?.content || '{}')
-    }
-    if (settings.provider === 'gemini') {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${settings.apiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: `${system}\n${user}` }] }] })
-      })
-      const data = await res.json()
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.replace(/```json|```/g, '') || '{}'
-      return JSON.parse(text)
-    }
+    const res = await fetch('/api/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task, payload })
+    })
+
+    const data = await res.json()
+    if (!res.ok || data?.error) throw new Error(data?.error || 'AI request failed')
+    return data
   } catch (e) {
-    console.warn('AI fallback used:', e)
+    console.warn('AI backend unavailable, mock fallback used:', e)
+    return mockAI(task, payload)
   }
-  return mockAI(task, payload)
 }
 
 function mockAI(task, payload) {
@@ -169,7 +152,7 @@ function Learning({ settings, setSettings }) {
   function saveSettings(next) { setSettings(next); setJSON(STORAGE.settings, next) }
   function clearData() { if (confirm('確定清空所有學習紀錄？')) { Object.values(STORAGE).forEach(k=>localStorage.removeItem(k)); location.reload() } }
   const advice = useMemo(() => stats.readings > stats.words ? '你閱讀量不錯，可以加強單字收藏和重溫。' : '建議每日先學 5 個單字，再讀一篇短文。', [stats])
-  return <section className="page grid2"><div className="panel"><h2>👤 My Learning</h2><div className="statsGrid"><Stat label="累積閱讀篇數" value={stats.readings}/><Stat label="學習單字數" value={stats.words}/><Stat label="翻譯分析" value={stats.translations}/><Stat label="學習天數" value={stats.days.length}/></div><Teacher title="AI 學習分析" text={advice}/><h3>收藏單字</h3><div className="list">{words.slice(0,8).map(w=><div className="listItem" key={w.word}><b>{w.word}</b><span>{w.translation}</span></div>)}{!words.length && <p className="hint">暫未收藏單字。</p>}</div><h3>最近閱讀</h3><div className="list">{readings.slice(0,6).map((r,i)=><div className="listItem" key={i}><b>{r.title}</b><span>{r.date}</span></div>)}</div></div><aside className="panel"><h3>AI API 設定</h3><Select label="AI Provider" v={settings.provider} set={v=>saveSettings({...settings,provider:v})} opts={['mock','openai','gemini']}/><input className="field" type="password" value={settings.apiKey} onChange={e=>saveSettings({...settings,apiKey:e.target.value})} placeholder="API Key（個人測試用）"/><p className="hint">mock 模式不需要 API Key。正式公開網站建議使用後端 API Proxy。</p><button className="primary" onClick={()=>alert('設定已保存')}><Save size={18}/> 保存設定</button><button className="danger" onClick={clearData}><Trash2 size={18}/> 清空資料</button><Teacher title="每日建議" text="今日任務：學 5 個單字、讀 1 篇 300 字短文、把 3 句好句加入筆記。"/></aside></section>
+  return <section className="page grid2"><div className="panel"><h2>👤 My Learning</h2><div className="statsGrid"><Stat label="累積閱讀篇數" value={stats.readings}/><Stat label="學習單字數" value={stats.words}/><Stat label="翻譯分析" value={stats.translations}/><Stat label="學習天數" value={stats.days.length}/></div><Teacher title="AI 學習分析" text={advice}/><h3>收藏單字</h3><div className="list">{words.slice(0,8).map(w=><div className="listItem" key={w.word}><b>{w.word}</b><span>{w.translation}</span></div>)}{!words.length && <p className="hint">暫未收藏單字。</p>}</div><h3>最近閱讀</h3><div className="list">{readings.slice(0,6).map((r,i)=><div className="listItem" key={i}><b>{r.title}</b><span>{r.date}</span></div>)}</div></div><aside className="panel"><h3>AI 後台設定</h3><div className="backendBox"><b>✅ 後台 API Proxy 模式</b><p>API Key 不會放在前端畫面，請到 Vercel Environment Variables 設定。</p><code>AI_PROVIDER</code><code>OPENAI_API_KEY</code><code>GEMINI_API_KEY</code></div><p className="hint">如果未設定後台 API Key，網站會自動使用示範教材模式，避免頁面壞掉。</p><button className="primary" onClick={()=>alert('請到 Vercel 後台設定 Environment Variables')}><Save size={18}/> 查看設定提示</button><button className="danger" onClick={clearData}><Trash2 size={18}/> 清空資料</button><Teacher title="每日建議" text="今日任務：學 5 個單字、讀 1 篇 300 字短文、把 3 句好句加入筆記。"/></aside></section>
 }
 
 function Loading(){ return <div className="loading"><Sparkles/> AI 老師正在準備教材...</div> }
