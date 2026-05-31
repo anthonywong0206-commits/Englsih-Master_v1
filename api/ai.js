@@ -1,6 +1,24 @@
 const SYSTEM_PROMPT = `You are English Master AI, a bilingual English teacher for Hong Kong learners. Return valid JSON only. Teach in Traditional Chinese and English.`
 
 function buildInstruction(task, payload) {
+
+  if (task === 'scenario') {
+    return `Create a practical daily English conversation lesson for Hong Kong learners.
+Scenario: ${payload?.title || 'Phone Call'}
+Situation: ${payload?.prompt || 'make an appointment'}
+Other speaker role: ${payload?.role || 'Receptionist'}
+Return JSON with exactly these keys:
+{
+  "title":"",
+  "situation":"",
+  "lines":[{"speaker":"你 (You)","role":"you","en":"","zh":""},{"speaker":"對方","role":"other","en":"","zh":""}],
+  "keySentences":[],
+  "vocabulary":[{"word":"","zh":"","note":""}],
+  "tips":[],
+  "practice":[]
+}`
+  }
+
   if (task === 'dictionary') {
     return `Analyze this English word for learners: ${payload?.word || 'environment'}.
 Return JSON with exactly these keys:
