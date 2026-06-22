@@ -41,7 +41,8 @@ function uniquePick(list = [], seed = '', avoid = []) {
   return pool[seededIndex(seed, pool.length)]
 }
 function inferScenarioId(payload = {}) {
-  const raw = `${payload.scenarioId || ''} ${payload.title || ''} ${payload.prompt || ''}`.toLowerCase()
+  if (payload.bankId) return payload.bankId
+  const raw = `${payload.scenarioId || ''} ${payload.displayScenarioId || ''} ${payload.title || ''} ${payload.prompt || ''}`.toLowerCase()
   if (raw.includes('restaurant') || raw.includes('餐廳')) return 'restaurant'
   if (raw.includes('takeaway') || raw.includes('外賣')) return 'takeaway'
   if (raw.includes('shopping') || raw.includes('購物')) return 'shopping'
@@ -67,13 +68,15 @@ function buildInstruction(task, payload) {
   if (task === 'scenario') {
     const id = inferScenarioId(payload)
     const bank = SCENARIO_BANK[id] || SCENARIO_BANK.phone
-    const microScenario = uniquePick(bank, seed, recentTitles)
+    const microScenario = payload?.prompt || payload?.contentPrompt || uniquePick(bank, seed, recentTitles)
     return `Create a practical daily English conversation lesson for Hong Kong learners.${noRepeat}
 Scenario category: ${payload?.title || id}
-Random micro-scenario from 250+ scenario bank: ${microScenario}
+Selected content: ${payload?.contentTitle || 'AI random'}
+Daily-life micro-scenario: ${microScenario}
 Other speaker role: ${payload?.role || 'Receptionist'}
 Requirements:
 - Make the setting specific, not generic.
+- Follow the selected content closely. If a selected content is supplied, do not replace it with a different scenario.
 - Use 5 to 7 short turns.
 - Use natural daily English, not textbook sentences.
 - Include Traditional Chinese translation for each line.

@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BookOpen, Languages, Newspaper, UserRound, Sparkles, Download, Image as ImageIcon, Moon, Sun, Save, Wand2, Upload, Trash2, Phone, Utensils, ShoppingBag, Plane, Briefcase, MoreHorizontal, Volume2, Mic, Play, RefreshCw, GraduationCap, Lightbulb, MessageCircle, Headphones, Home, Camera, FileText } from 'lucide-react'
+import { BookOpen, Languages, Newspaper, UserRound, Sparkles, Download, Image as ImageIcon, Moon, Sun, Save, Wand2, Upload, Trash2, Phone, Utensils, ShoppingBag, Plane, Briefcase, MoreHorizontal, Volume2, Mic, Play, RefreshCw, GraduationCap, Lightbulb, MessageCircle, Headphones, Home, Camera, FileText, Stethoscope, Mail, Hotel, Bus, Users, Landmark, MapPin, Coffee } from 'lucide-react'
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
 import * as pdfjsLib from 'pdfjs-dist'
@@ -21,12 +21,102 @@ const STORAGE = {
 
 const defaultSettings = { theme: 'light' }
 const SCENARIOS = [
-  { id: 'phone', icon: Phone, title: '電話對答', en: 'Phone Call', role: 'Receptionist', prompt: '打電話預約醫生', accent: 'purple' },
-  { id: 'restaurant', icon: Utensils, title: '餐廳點餐', en: 'Restaurant', role: 'Waiter', prompt: '在餐廳點餐及查詢推薦菜式', accent: 'orange' },
-  { id: 'takeaway', icon: ShoppingBag, title: '叫外賣', en: 'Takeaway', role: 'Staff', prompt: '用電話或App叫外賣', accent: 'pink' },
-  { id: 'shopping', icon: Briefcase, title: '購物付款', en: 'Shopping', role: 'Shop assistant', prompt: '查詢價錢、尺寸及付款', accent: 'green' },
-  { id: 'travel', icon: Plane, title: '旅行住宿', en: 'Travel', role: 'Hotel staff', prompt: '酒店入住及查詢設施', accent: 'blue' },
-  { id: 'more', icon: MoreHorizontal, title: '更多', en: 'More', role: 'Teacher', prompt: '日常英語情境練習', accent: 'gray' }
+  { id: 'phone', icon: Phone, title: '電話對答', en: 'Phone Call', role: 'Receptionist', prompt: '打電話預約及查詢資料', accent: 'purple', topics: [
+    { id: 'clinic-booking', title: '預約診所', prompt: 'call a clinic to make an appointment and confirm the consultation time' },
+    { id: 'reschedule', title: '改期／取消', prompt: 'call to reschedule or cancel an appointment politely' },
+    { id: 'late-call', title: '通知遲到', prompt: 'call to say you will be about 15 minutes late and apologise' },
+    { id: 'customer-service', title: '客戶服務', prompt: 'call customer service about a late delivery or missing item' },
+    { id: 'leave-message', title: '留言找人', prompt: 'call an office and leave a short message for someone' },
+    { id: 'opening-hours', title: '查詢時間', prompt: 'call to ask about business hours, fees and required documents' }
+  ]},
+  { id: 'restaurant', icon: Utensils, title: '餐廳用語', en: 'Restaurant', role: 'Waiter', prompt: '餐廳點餐及查詢推薦菜式', accent: 'orange', topics: [
+    { id: 'book-table', title: '訂位', prompt: 'book a table for two during a busy evening and ask for a quiet table' },
+    { id: 'order-food', title: '點餐推薦', prompt: 'order food at a restaurant and ask for the waiter’s recommendation' },
+    { id: 'food-allergy', title: '食物敏感', prompt: 'ask about food allergies and request no peanuts or seafood' },
+    { id: 'wrong-dish', title: '送錯餐', prompt: 'politely say the wrong dish was served and ask for help' },
+    { id: 'too-spicy', title: '太辣／太鹹', prompt: 'say the food is too spicy or too salty and ask for a replacement' },
+    { id: 'split-bill', title: '埋單分帳', prompt: 'ask for the bill, split the bill and request a receipt' }
+  ]},
+  { id: 'takeaway', icon: ShoppingBag, title: '外賣／咖啡', en: 'Takeaway', role: 'Staff', prompt: '用電話或App叫外賣', accent: 'pink', topics: [
+    { id: 'order-takeaway', title: '電話叫外賣', prompt: 'order takeaway by phone and confirm pickup time' },
+    { id: 'delivery-address', title: '更改地址', prompt: 'change the delivery address and give clear building instructions' },
+    { id: 'missing-item', title: '漏單處理', prompt: 'report that part of the order is missing and ask for a solution' },
+    { id: 'coffee-order', title: '買咖啡', prompt: 'order coffee with less sugar, no ice and takeaway' },
+    { id: 'office-lunch', title: '公司午餐', prompt: 'order lunch takeaway for a small office group' },
+    { id: 'refund-order', title: '退款／錯餐', prompt: 'ask for a refund or replacement because the wrong order arrived' }
+  ]},
+  { id: 'shopping', icon: CreditCard, title: '購物付款', en: 'Shopping', role: 'Shop assistant', prompt: '查詢價錢、尺寸及付款', accent: 'green', topics: [
+    { id: 'ask-size', title: '尺碼顏色', prompt: 'ask for another size and another colour in a clothes shop' },
+    { id: 'discount', title: '折扣優惠', prompt: 'ask whether there is a discount, promotion or membership offer' },
+    { id: 'refund-policy', title: '退貨換貨', prompt: 'return or exchange an item politely with a receipt' },
+    { id: 'warranty', title: '保養查詢', prompt: 'ask about product warranty and repair service' },
+    { id: 'gift', title: '買禮物', prompt: 'ask for recommendations for a birthday gift within a budget' },
+    { id: 'stock-check', title: '查詢存貨', prompt: 'ask if an item is in stock in another branch' }
+  ]},
+  { id: 'travel', icon: Plane, title: '旅行住宿', en: 'Travel', role: 'Hotel staff', prompt: '酒店入住及查詢設施', accent: 'blue', topics: [
+    { id: 'hotel-checkin', title: '酒店入住', prompt: 'check in at a hotel and ask about breakfast and Wi-Fi' },
+    { id: 'room-problem', title: '房間問題', prompt: 'ask to change rooms because the room is noisy or the key does not work' },
+    { id: 'airport-help', title: '機場求助', prompt: 'ask airline staff for help after missing a flight' },
+    { id: 'directions', title: '問路交通', prompt: 'ask for directions to a train station or tourist attraction' },
+    { id: 'lost-luggage', title: '行李遺失', prompt: 'report lost luggage and ask what to do next' },
+    { id: 'taxi', title: '搭的士', prompt: 'ask a taxi driver to use the meter and request a receipt' }
+  ]},
+  { id: 'clinic', icon: Stethoscope, title: '醫院診所', en: 'Clinic', role: 'Nurse', prompt: '描述症狀及查詢流程', accent: 'red', topics: [
+    { id: 'fever', title: '發燒咳嗽', prompt: 'tell the nurse you have had a fever and cough for three days' },
+    { id: 'stomach-pain', title: '肚痛不適', prompt: 'describe stomach pain and ask if you need to see a doctor urgently' },
+    { id: 'medicine', title: '藥物指示', prompt: 'ask how to take medicine and whether there are side effects' },
+    { id: 'sick-leave', title: '病假紙', prompt: 'ask for a sick leave certificate and a receipt for insurance' },
+    { id: 'follow-up', title: '覆診安排', prompt: 'ask about follow-up appointment and test results' },
+    { id: 'elderly-family', title: '陪長者求醫', prompt: 'ask for help for an elderly family member at a clinic' }
+  ]},
+  { id: 'interview', icon: Briefcase, title: '面試求職', en: 'Interview', role: 'Interviewer', prompt: '面試問答及自我介紹', accent: 'teal', topics: [
+    { id: 'self-intro', title: '自我介紹', prompt: 'introduce yourself confidently in a job interview' },
+    { id: 'strengths', title: '優點弱點', prompt: 'talk about your strengths and weakness politely' },
+    { id: 'teamwork', title: '團隊合作', prompt: 'answer an interview question about teamwork and conflict' },
+    { id: 'experience', title: '工作經驗', prompt: 'explain previous work experience with a practical example' },
+    { id: 'salary', title: '薪金期望', prompt: 'answer a question about salary expectation politely' },
+    { id: 'next-steps', title: '查詢結果', prompt: 'ask about next steps and when the result will be available' }
+  ]},
+  { id: 'email', icon: Mail, title: '工作電郵', en: 'Work Email', role: 'Colleague', prompt: '撰寫及回覆工作電郵', accent: 'indigo', topics: [
+    { id: 'meeting', title: '會議改期', prompt: 'write a polite work message to reschedule a meeting' },
+    { id: 'follow-up', title: '跟進電郵', prompt: 'follow up an email politely because there has been no reply' },
+    { id: 'deadline', title: '延遲交付', prompt: 'explain a short delay and propose a new deadline' },
+    { id: 'request-info', title: '索取資料', prompt: 'ask a colleague for information or documents politely' },
+    { id: 'thank-you', title: '感謝協助', prompt: 'thank a colleague for help in a professional tone' },
+    { id: 'apology', title: '道歉修正', prompt: 'apologise for a small mistake and provide a corrected version' }
+  ]},
+  { id: 'transport', bankId: 'travel', icon: Bus, title: '交通出行', en: 'Transport', role: 'Station staff', prompt: '搭車轉車及問路', accent: 'cyan', topics: [
+    { id: 'bus-route', title: '巴士路線', prompt: 'ask which bus to take and where to get off' },
+    { id: 'train-transfer', title: '港鐵轉車', prompt: 'ask how to transfer trains and find the right platform' },
+    { id: 'lost-card', title: '遺失交通卡', prompt: 'ask station staff what to do after losing a travel card' },
+    { id: 'delay', title: '交通延誤', prompt: 'explain that you are late because of transport delay' },
+    { id: 'taxi-address', title: '向司機說地址', prompt: 'give a taxi driver a clear address and ask for a receipt' },
+    { id: 'accessible-route', title: '無障礙路線', prompt: 'ask for an accessible route with lifts or fewer stairs' }
+  ]},
+  { id: 'social', bankId: 'phone', icon: Users, title: '社交閒談', en: 'Small Talk', role: 'New friend', prompt: '日常社交及閒談', accent: 'lime', topics: [
+    { id: 'first-meet', title: '初次見面', prompt: 'meet someone for the first time and start a friendly conversation' },
+    { id: 'weekend', title: '週末近況', prompt: 'talk about weekend plans and ask follow-up questions' },
+    { id: 'weather', title: '天氣話題', prompt: 'make small talk about hot or rainy weather naturally' },
+    { id: 'hobbies', title: '興趣愛好', prompt: 'talk about hobbies and invite the other person to share' },
+    { id: 'compliment', title: '稱讚回應', prompt: 'give and respond to a simple compliment politely' },
+    { id: 'say-goodbye', title: '禮貌告別', prompt: 'end a short conversation politely and naturally' }
+  ]},
+  { id: 'bank', bankId: 'phone', icon: Landmark, title: '銀行服務', en: 'Banking', role: 'Bank staff', prompt: '銀行查詢及處理問題', accent: 'gold', topics: [
+    { id: 'card-issue', title: '信用卡問題', prompt: 'call a bank to ask about a card issue and identity verification' },
+    { id: 'lost-card', title: '遺失銀行卡', prompt: 'report a lost bank card and ask what to do next' },
+    { id: 'fee', title: '手續費查詢', prompt: 'ask about account fees and required documents' },
+    { id: 'transfer', title: '轉帳問題', prompt: 'ask about a transfer that has not arrived yet' },
+    { id: 'appointment', title: '分行預約', prompt: 'book an appointment at a bank branch' },
+    { id: 'statement', title: '月結單', prompt: 'ask for a bank statement or proof of account' }
+  ]},
+  { id: 'cafe', bankId: 'takeaway', icon: Coffee, title: '咖啡店', en: 'Cafe', role: 'Barista', prompt: '咖啡店點飲品及外賣', accent: 'brown', topics: [
+    { id: 'less-sugar', title: '少甜少冰', prompt: 'order a drink with less sugar and no ice' },
+    { id: 'milk-option', title: '奶類選擇', prompt: 'ask for oat milk or a non-dairy option' },
+    { id: 'pickup', title: '手機落單取餐', prompt: 'pick up a mobile order at a café counter' },
+    { id: 'recommend', title: '店員推薦', prompt: 'ask the barista to recommend a drink that is not too sweet' },
+    { id: 'wrong-drink', title: '飲品做錯', prompt: 'politely say the drink was made incorrectly' },
+    { id: 'study-seat', title: '找座位', prompt: 'ask if there is a seat with a power socket for studying' }
+  ]}
 ]
 
 function getJSON(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback } catch { return fallback } }
@@ -231,7 +321,9 @@ async function analyzeSpeechBlob(blob, expectedText = '') {
 }
 
 function mockScenario(payload = {}) {
-  const s = SCENARIOS.find(x => x.id === payload.scenarioId) || SCENARIOS[0]
+  const s = SCENARIOS.find(x => x.id === (payload.displayScenarioId || payload.scenarioId)) || SCENARIOS.find(x => x.id === payload.scenarioId) || SCENARIOS[0]
+  const topicTitle = payload?.topic?.title || payload?.contentTitle || '基礎對話'
+  const promptText = payload?.topic?.prompt || payload?.prompt || s.prompt
   const lines = s.id === 'restaurant' ? [
     { speaker: '你 (You)', role: 'you', en: "Hi, could I have a table for two, please?", zh: '你好，請問有兩位的座位嗎？' },
     { speaker: `對方 (${s.role})`, role: 'other', en: 'Sure. Would you like to sit inside or outside?', zh: '當然可以。你想坐室內還是室外？' },
@@ -252,8 +344,8 @@ function mockScenario(payload = {}) {
     { speaker: `對方 (${s.role})`, role: 'other', en: "You're welcome! See you then.", zh: '不客氣！到時見。' }
   ]
   return {
-    title: `${s.title}（${s.prompt}）`,
-    situation: `你正在練習「${s.prompt}」的日常英文對話。`,
+    title: `${s.title}｜${topicTitle}`,
+    situation: `你正在練習「${promptText}」的日常英文對話。`,
     lines,
     keySentences: ["I'd like to ...", 'What time are you available?', 'Could I have ...?', 'Let me check...', 'Is that ok for you?'],
     vocabulary: [
@@ -309,53 +401,106 @@ function App() {
   </div>
 }
 
+function getScenarioTopics(scenario) {
+  return Array.isArray(scenario?.topics) && scenario.topics.length ? scenario.topics : [
+    { id: 'default', title: scenario?.title || '日常英語', prompt: scenario?.prompt || 'daily English practice' }
+  ]
+}
+
 function ScenarioHome() {
   const [selected, setSelected] = useState('phone')
-  const [result, setResult] = useState(mockScenario({ scenarioId: 'phone' }))
+  const initialScenario = SCENARIOS.find(x => x.id === 'phone') || SCENARIOS[0]
+  const [selectedTopic, setSelectedTopic] = useState(getScenarioTopics(initialScenario)[0]?.id || 'default')
+  const [result, setResult] = useState(mockScenario({ scenarioId: 'phone', topic: getScenarioTopics(initialScenario)[0] }))
   const [loading, setLoading] = useState(false)
+  const [customSituation, setCustomSituation] = useState('')
   const ref = useRef(null)
   const stats = getJSON(STORAGE.stats, { scenarios: 0, days: [] })
   const scenario = SCENARIOS.find(x => x.id === selected) || SCENARIOS[0]
-  async function generate(id = selected) {
+  const topics = getScenarioTopics(scenario)
+  const topic = topics.find(x => x.id === selectedTopic) || topics[0]
+
+  async function generate(id = selected, topicId = selectedTopic, customText = customSituation) {
     setLoading(true)
     const s = SCENARIOS.find(x => x.id === id) || scenario || SCENARIOS[0]
+    const availableTopics = getScenarioTopics(s)
+    const pickedTopic = availableTopics.find(x => x.id === topicId) || availableTopics[0]
+    const finalPrompt = customText?.trim() || pickedTopic?.prompt || s.prompt
     try {
-      const raw = await askAI('scenario', { scenarioId: id, title: s.title, prompt: s.prompt, role: s.role, seed: makeSeed(), recentTitles: recentScenarioTitles(), avoidRepeat: true })
-      const data = normalizeScenarioResult(raw, s)
+      const raw = await askAI('scenario', {
+        scenarioId: s.bankId || s.id,
+        displayScenarioId: s.id,
+        title: s.title,
+        prompt: finalPrompt,
+        contentTitle: customText?.trim() ? '自訂內容' : pickedTopic?.title,
+        role: s.role,
+        seed: makeSeed(),
+        recentTitles: recentScenarioTitles(),
+        avoidRepeat: true
+      })
+      const data = normalizeScenarioResult(raw, { ...s, prompt: finalPrompt })
       setResult(data)
       updateStats('scenario')
       const history = getJSON(STORAGE.scenarios, [])
-      setJSON(STORAGE.scenarios, [{ title: data.title || s.title, date: today(), scenario: s.title }, ...history].slice(0, 30))
+      setJSON(STORAGE.scenarios, [{ title: data.title || s.title, date: today(), scenario: s.title, topic: customText?.trim() || pickedTopic?.title }, ...history].slice(0, 30))
     } catch (err) {
       console.warn('Scenario generation failed:', err)
-      setResult(normalizeScenarioResult(null, s))
+      setResult(normalizeScenarioResult(null, { ...s, prompt: finalPrompt }))
     } finally {
       setLoading(false)
     }
   }
+
+  function selectScenario(id) {
+    const next = SCENARIOS.find(x => x.id === id) || SCENARIOS[0]
+    const firstTopic = getScenarioTopics(next)[0]
+    setSelected(id)
+    setSelectedTopic(firstTopic?.id || 'default')
+    setCustomSituation('')
+    generate(id, firstTopic?.id || 'default', '')
+  }
+
+  function selectTopic(topicId) {
+    setSelectedTopic(topicId)
+    setCustomSituation('')
+    generate(selected, topicId, '')
+  }
+
   function speak(text) { try { const u = new SpeechSynthesisUtterance(text); u.lang = 'en-US'; window.speechSynthesis.speak(u) } catch {} }
+  function playAll() { try { window.speechSynthesis.cancel(); (result.lines || []).forEach((line, index) => setTimeout(() => speak(line.en), index * 1900)) } catch {} }
+
   return <section className="mobilePage">
-    <div className="welcome"><div><h2>👋 早安！一起練習英文吧！</h2><p>選擇一個情境，AI 會生成模擬對話＋旁邊教學框。</p></div><div className="todayRing"><b>{Math.min(100, 35 + stats.scenarios * 8)}%</b><span>今日進度</span></div></div>
-    <div className="scenarioScroller">{SCENARIOS.map(s => { const Icon = s.icon; return <button key={s.id} className={`scenarioCard ${selected === s.id ? 'active' : ''}`} onClick={() => { setSelected(s.id); generate(s.id) }}><Icon size={26}/><b>{s.title}</b><span>{s.en}</span></button> })}</div>
+    <div className="welcome"><div><h2>👋 早安！一起練習英文吧！</h2><p>選擇日常情境，再自選內容，AI 會生成模擬對話＋旁邊教學框。</p></div><div className="todayRing"><b>{Math.min(100, 35 + stats.scenarios * 8)}%</b><span>今日進度</span></div></div>
+    <div className="scenarioScroller expanded">{SCENARIOS.map(s => { const Icon = s.icon; return <button key={s.id} className={`scenarioCard ${selected === s.id ? 'active' : ''}`} onClick={() => selectScenario(s.id)}><Icon size={26}/><b>{s.title}</b><span>{s.en}</span></button> })}</div>
+
+    <div className="topicPicker panel">
+      <div className="topicHead"><div><h3>{scenario.title}｜自選內容</h3><p className="hint">每個情境都有不同日常任務，按一次即生成新教材。</p></div><span>{topics.length} 個內容</span></div>
+      <div className="topicChips">{topics.map(t => <button key={t.id} className={selectedTopic === t.id && !customSituation ? 'active' : ''} onClick={() => selectTopic(t.id)}><b>{t.title}</b><small>{t.prompt}</small></button>)}</div>
+      <div className="customScenarioBox">
+        <input className="field" value={customSituation} onChange={e=>setCustomSituation(e.target.value)} placeholder="或者輸入自訂情境：例如 在機場要求改早一班機" />
+        <button className="primary" onClick={() => generate(selected, selectedTopic, customSituation)}><Sparkles size={18}/> 生成自訂情境</button>
+      </div>
+    </div>
+
     {loading && <Loading/>}
     <div className="lessonLayout" ref={ref}>
       <section className="conversationPanel">
-        <div className="sectionHead"><div><h2>✨ 情境模擬對話</h2><span>{result.title}</span></div><button className="outlineBtn" onClick={() => generate()}><RefreshCw size={17}/> 換一個情境</button></div>
-        <div className="situationBox"><div><b>情境描述</b><p>{result.situation}</p></div><div className="teacherAvatar">👩🏻‍🏫</div></div>
-        <div className="chatList">{result.lines?.map((line, i) => <div className={`chatRow ${line.role}`} key={i}><div className="avatar">{line.role === 'you' ? '🧑🏻' : '👩🏻'}</div><div className="bubble"><b>{line.speaker}</b><p>{line.en}</p><span>{line.zh}</span><button className="sound" onClick={() => speak(line.en)}><Volume2 size={16}/></button></div></div>)}</div>
-        <div className="practiceBtns"><button><Mic size={18}/> 錄音練習</button><button className="softBtn"><Play size={18}/> 播放全部</button><button className="softBtn" onClick={() => generate()}><RefreshCw size={18}/> 換一個</button></div>
+        <div className="sectionHead"><div><h2>✨ 情境模擬對話</h2><span>{result.title}</span></div><button className="outlineBtn" onClick={() => generate()}><RefreshCw size={17}/> 換一個版本</button></div>
+        <div className="situationBox"><div><b>情境描述</b><p>{result.situation}</p><small>目前內容：{customSituation?.trim() || topic?.title}</small></div><div className="teacherAvatar">👩🏻‍🏫</div></div>
+        <div className="chatList">{(result.lines || []).map((line, i) => <div className={`chatRow ${line.role}`} key={i}><div className="avatar">{line.role === 'you' ? '🧑🏻' : '👩🏻'}</div><div className="bubble"><b>{line.speaker}</b><p>{line.en}</p><span>{line.zh}</span><button className="sound" onClick={() => speak(line.en)}><Volume2 size={16}/></button></div></div>)}</div>
+        <div className="practiceBtns"><button><Mic size={18}/> 錄音練習</button><button className="softBtn" onClick={playAll}><Play size={18}/> 播放全部</button><button className="softBtn" onClick={() => generate()}><RefreshCw size={18}/> 換一個</button></div>
       </section>
       <aside className="teachingPanel">
         <h2>學習重點</h2>
         <LessonBlock icon={<MessageCircle/>} title="重點句型" items={result.keySentences}/>
-        <div className="lessonBlock"><div className="lessonTitle"><BookOpen/> <b>實用單字</b></div>{result.vocabulary?.map(v => <div className="wordLine" key={v.word}><b>{v.word}</b><span>{v.zh}</span><small>{v.note}</small></div>)}</div>
+        <div className="lessonBlock"><div className="lessonTitle"><BookOpen/> <b>實用單字</b></div>{(result.vocabulary || []).map((v, i) => <div className="wordLine" key={`${v.word}-${i}`}><b>{v.word}</b><span>{v.zh}</span><small>{v.note}</small></div>)}</div>
         <LessonBlock icon={<Lightbulb/>} title="小貼士" items={result.tips}/>
         <LessonBlock icon={<Headphones/>} title="延伸練習" items={result.practice}/>
       </aside>
     </div>
     <ShareBox refEl={ref} fileName="scenario-lesson" />
-    <h3 className="moreTitle">更多日常場景</h3>
-    <div className="miniScenarioGrid">{['酒店入住','問路指路','搭乘交通','看醫生','面試求職','更多場景'].map((x,i)=><div className="miniScene" key={x}><span>{['🏨','🗺️','🚌','🩺','👨🏻‍💼','•••'][i]}</span><b>{x}</b><small>{10+i} 對話</small></div>)}</div>
+    <h3 className="moreTitle">新增日常場景</h3>
+    <div className="miniScenarioGrid">{SCENARIOS.slice(6).map(s => <div className="miniScene" key={s.id} onClick={() => selectScenario(s.id)}><span>{s.id === 'clinic' ? '🏥' : s.id === 'interview' ? '💼' : s.id === 'email' ? '✉️' : s.id === 'transport' ? '🚌' : s.id === 'social' ? '👥' : s.id === 'bank' ? '🏦' : '☕'}</span><b>{s.title}</b><small>{getScenarioTopics(s).length} 個內容</small></div>)}</div>
   </section>
 }
 
