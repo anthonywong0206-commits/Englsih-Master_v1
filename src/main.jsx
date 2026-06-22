@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BookOpen, Languages, Newspaper, UserRound, Sparkles, Download, Image as ImageIcon, Moon, Sun, Save, Wand2, Upload, Trash2, Phone, Utensils, ShoppingBag, Plane, Briefcase, MoreHorizontal, Volume2, Mic, Play, RefreshCw, GraduationCap, Lightbulb, MessageCircle, Headphones, Home, Camera, FileText, Stethoscope, Mail, Hotel, Bus, Users, Landmark, MapPin, Coffee } from 'lucide-react'
+import { BookOpen, Languages, Newspaper, UserRound, Sparkles, Download, Image as ImageIcon, Moon, Sun, Save, Wand2, Upload, Trash2, Phone, Utensils, ShoppingBag, Plane, Briefcase, MoreHorizontal, Volume2, Mic, Play, RefreshCw, GraduationCap, Lightbulb, MessageCircle, Headphones, Home, Camera, FileText, Stethoscope, Mail, Hotel, Bus, Users, Landmark, MapPin, Coffee, CreditCard } from 'lucide-react'
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
 import * as pdfjsLib from 'pdfjs-dist'
